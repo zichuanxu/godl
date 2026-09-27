@@ -1,0 +1,14 @@
+.slim/deepwork/
+node_modules/
+dist/
+build/
+coverage.out
+*.log
+.env
+.env.*
+!.env.example
+app/frontend/dist/
+app/frontend/node_modules/
+.omc/
+.serena/
+.DS_Store
