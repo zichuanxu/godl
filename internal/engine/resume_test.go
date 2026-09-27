@@ -121,7 +121,14 @@ func TestRandomizedCrashResume(t *testing.T) {
 		for srv.sent.Load() < target && len(done) == 0 {
 			time.Sleep(200 * time.Microsecond)
 		}
-		time.Sleep(2 * cfg.CheckpointInterval)
+		// Wait for a checkpoint that records progress rather than a fixed
+		// time: timer resolution differs by OS (coarse on Windows runners).
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && len(done) == 0; {
+			if cp, err := readCheckpoint(dest + ".part.meta"); err == nil && totalSize(cp.Remaining) < int64(len(data)) {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
 
 		crash := filepath.Join(dir, "crashed.bin")
 		taken := copyFile(t, dest+".part.meta", crash+".part.meta") && copyFile(t, dest+".part", crash+".part")
