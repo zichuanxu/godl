@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zichuanxu/godl/internal/filelock"
 	"github.com/zichuanxu/godl/internal/hls"
@@ -422,12 +423,30 @@ func identityEncoding(resp *http.Response) error {
 }
 
 func statusError(what string, resp *http.Response) *attemptError {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	msg := fmt.Sprintf("%s: HTTP %s", what, resp.Status)
-	if text := strings.TrimSpace(string(body)); text != "" {
+	if text := errorBody(resp); text != "" {
 		msg += ": " + text
 	}
 	return &attemptError{err: errors.New(msg), retryable: retryableStatus(resp.StatusCode), retryAfter: resp.Header.Get("Retry-After")}
+}
+
+// maxErrorBody caps the response text quoted in an error, in runes.
+const maxErrorBody = 200
+
+// errorBody returns a short, single-line excerpt of an error response. A
+// plain-text or JSON body often says why the request was refused; an HTML
+// page (a login wall or a bot check) only buries the status, so it is left
+// out.
+func errorBody(resp *http.Response) string {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	text := strings.Join(strings.Fields(string(body)), " ")
+	if text == "" || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "html") || strings.HasPrefix(text, "<") || !utf8.ValidString(text) {
+		return ""
+	}
+	if runes := []rune(text); len(runes) > maxErrorBody {
+		text = string(runes[:maxErrorBody]) + "…"
+	}
+	return text
 }
 
 // Remote describes a resource as the capability probe saw it.
