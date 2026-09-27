@@ -22,6 +22,17 @@ export class Desktop {
      */
     "askDirectory": boolean;
 
+    /**
+     * OpenWhenDone opens each file with its default app when it completes.
+     */
+    "openWhenDone": boolean;
+
+    /**
+     * FFmpeg is the ffmpeg executable for converting streams to MP4; empty
+     * means ffmpeg on PATH.
+     */
+    "ffmpeg"?: string;
+
     /** Creates a new Desktop instance. */
     constructor($$source: Partial<Desktop> = {}) {
         if (!("clipboardMonitor" in $$source)) {
@@ -32,6 +43,9 @@ export class Desktop {
         }
         if (!("askDirectory" in $$source)) {
             this["askDirectory"] = false;
+        }
+        if (!("openWhenDone" in $$source)) {
+            this["openWhenDone"] = false;
         }
 
         Object.assign(this, $$source);

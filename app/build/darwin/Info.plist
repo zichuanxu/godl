@@ -23,6 +23,8 @@
             <string>12.0.0</string>
         <key>NSHighResolutionCapable</key>
             <string>true</string>
+        <key>NSAppleEventsUsageDescription</key>
+            <string>godl asks System Events to shut down the computer when you choose "When done: Shut down".</string>
         <key>NSHumanReadableCopyright</key>
             <string>Copyright 2026 zichuanxu. Apache-2.0.</string>
     </dict>

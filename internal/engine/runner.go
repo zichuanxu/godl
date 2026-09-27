@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/hls"
 )
 
 // Runner adapts the engine to the service's download.Runner contract. Every
@@ -68,9 +69,14 @@ func (r *Runner) Download(ctx context.Context, spec download.Spec, progress func
 	return err
 }
 
-// Discard removes the downloader's resumable partial state for destination.
+// Discard removes the downloader's resumable partial state for destination,
+// including an HLS download's segment directory.
 func (r *Runner) Discard(destination string) error {
-	var errs []error
+	err := hls.Discard(destination)
+	if errors.Is(err, hls.ErrLocked) {
+		return err // another process is still writing these files
+	}
+	errs := []error{err}
 	for _, path := range []string{destination + ".part", destination + ".part.meta"} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)

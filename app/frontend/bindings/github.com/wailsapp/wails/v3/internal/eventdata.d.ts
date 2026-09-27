@@ -14,6 +14,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "clipboard": string;
             "download": download$0.Event;
+            "queue-done": string;
         }
     }
 }

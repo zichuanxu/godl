@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/zichuanxu/godl/internal/filelock"
+	"github.com/zichuanxu/godl/internal/hls"
+	"github.com/zichuanxu/godl/internal/quarantine"
 	"golang.org/x/time/rate"
 )
 
@@ -151,7 +153,8 @@ func New(cfg Config) (*Engine, error) {
 
 // Download writes dest+".part", keeps resume state in dest+".part.meta", and
 // atomically renames the verified file to dest. Partial state survives
-// failures and cancellation so a later call resumes.
+// failures and cancellation so a later call resumes. An HLS playlist, known
+// by its URL or Content-Type, is downloaded as one stream (DESIGN.md 3.7).
 func (e *Engine) Download(ctx context.Context, rawURL, dest string, onProgress func(Progress)) error {
 	if ctx == nil {
 		return errors.New("nil context")
@@ -165,6 +168,20 @@ func (e *Engine) Download(ctx context.Context, rawURL, dest string, onProgress f
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("create destination directory: %w", err)
 	}
+	var err error
+	if hls.Detect("", rawURL, nil) {
+		err = e.downloadHLS(ctx, rawURL, dest, onProgress)
+	} else if err = e.downloadFile(ctx, rawURL, dest, onProgress); errors.Is(err, errPlaylist) {
+		err = e.downloadHLS(ctx, rawURL, dest, onProgress)
+	}
+	if err == nil {
+		// Best effort: some file systems (FAT, network shares) refuse it.
+		_ = quarantine.Mark(dest, rawURL)
+	}
+	return err
+}
+
+func (e *Engine) downloadFile(ctx context.Context, rawURL, dest string, onProgress func(Progress)) error {
 	release, err := filelock.Acquire(dest + ".lock")
 	if errors.Is(err, filelock.ErrLocked) {
 		return fmt.Errorf("%w: %s", ErrLocked, dest)
@@ -197,6 +214,10 @@ func (e *Engine) Download(ctx context.Context, rawURL, dest string, onProgress f
 		info, err := e.probe(ctx, rawURL)
 		if err != nil {
 			return err
+		}
+		// The final URL catches a redirect to an .m3u8 served as a generic type.
+		if hls.Detect(info.contentType, info.finalURL, nil) {
+			return errPlaylist // handled after the lock is released
 		}
 		if info.ranges && info.size > 0 {
 			err = job.ranged(ctx, info)

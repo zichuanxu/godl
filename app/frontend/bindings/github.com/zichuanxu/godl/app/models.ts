@@ -6,6 +6,38 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * ImportResult reports an import.
+ */
+export class ImportResult {
+    "added": number;
+    "failed": string[];
+
+    /** Creates a new ImportResult instance. */
+    constructor($$source: Partial<ImportResult> = {}) {
+        if (!("added" in $$source)) {
+            this["added"] = 0;
+        }
+        if (!("failed" in $$source)) {
+            this["failed"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ImportResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ImportResult {
+        const $$createField1_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("failed" in $$parsedSource) {
+            $$parsedSource["failed"] = $$createField1_0($$parsedSource["failed"]);
+        }
+        return new ImportResult($$parsedSource as Partial<ImportResult>);
+    }
+}
+
+/**
  * State describes the backend to the frontend.
  */
 export class State {
@@ -42,3 +74,6 @@ export class State {
         return new State($$parsedSource as Partial<State>);
     }
 }
+
+// Private type creation functions
+const $$createType0 = $Create.Array($Create.Any);

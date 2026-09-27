@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zichuanxu/godl/internal/download"
@@ -151,25 +152,41 @@ FROM downloads ORDER BY created_at, id`
 	return items, nil
 }
 
+// Update stores everything but the request headers, which change only
+// through UpdateHeaders: rewriting them on every transition would replace
+// sealed values this process cannot open with empty ones.
 func (s *SQLite) Update(ctx context.Context, item download.Item) error {
-	headers, err := s.encodeHeaders(item.Headers)
-	if err != nil {
-		return err
-	}
 	const query = `UPDATE downloads SET url = ?, destination = ?, status = ?, completed = ?, total = ?, error = ?,
-priority = ?, connections = ?, speed_limit = ?, checksum = ?, headers = ?, updated_at = ? WHERE id = ?`
+priority = ?, connections = ?, speed_limit = ?, checksum = ?, updated_at = ? WHERE id = ?`
 	result, err := s.db.ExecContext(ctx, query, item.URL, item.Destination, item.Status, item.Completed,
-		item.Total, item.Error, item.Priority, item.Connections, item.SpeedLimit, item.Checksum, headers,
+		item.Total, item.Error, item.Priority, item.Connections, item.SpeedLimit, item.Checksum,
 		item.UpdatedAt.Format(time.RFC3339Nano), item.ID)
 	if err != nil {
 		return fmt.Errorf("update download %s: %w", item.ID, err)
 	}
+	return affected(result, item.ID)
+}
+
+// UpdateHeaders replaces a download's request headers.
+func (s *SQLite) UpdateHeaders(ctx context.Context, id string, h map[string]string) error {
+	headers, err := s.encodeHeaders(h)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE downloads SET headers = ? WHERE id = ?`, headers, id)
+	if err != nil {
+		return fmt.Errorf("update download headers %s: %w", id, err)
+	}
+	return affected(result, id)
+}
+
+func affected(result sql.Result, id string) error {
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("count updated download %s: %w", item.ID, err)
+		return fmt.Errorf("count updated download %s: %w", id, err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrNotFound, item.ID)
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	return nil
 }
@@ -269,7 +286,13 @@ func (s *SQLite) decodeHeaders(value string) (map[string]string, error) {
 	return h, nil
 }
 
-// siteSecret is the sealed part of a site entry.
+// sealedSettings is the sealed part of the settings: site headers and
+// passwords by site index, and the proxy URL, which may carry credentials.
+type sealedSettings struct {
+	Sites    []siteSecret `json:"sites"`
+	ProxyURL string       `json:"proxyURL,omitempty"`
+}
+
 type siteSecret struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 	Password string            `json:"password,omitempty"`
@@ -294,33 +317,44 @@ func (s *SQLite) LoadSettings(ctx context.Context) (settings.Settings, bool, err
 		return settings.Settings{}, false, err
 	}
 	if plain != "" {
-		var bySite []siteSecret
-		if err := json.Unmarshal([]byte(plain), &bySite); err != nil {
-			return settings.Settings{}, false, fmt.Errorf("parse site secrets: %w", err)
+		var secret sealedSettings
+		if strings.HasPrefix(plain, "[") { // v0.3 stored the site list alone
+			err = json.Unmarshal([]byte(plain), &secret.Sites)
+		} else {
+			err = json.Unmarshal([]byte(plain), &secret)
+		}
+		if err != nil {
+			return settings.Settings{}, false, fmt.Errorf("parse sealed settings: %w", err)
 		}
 		for i := range out.Sites {
-			if i < len(bySite) {
-				out.Sites[i].Headers, out.Sites[i].Password = bySite[i].Headers, bySite[i].Password
+			if i < len(secret.Sites) {
+				out.Sites[i].Headers, out.Sites[i].Password = secret.Sites[i].Headers, secret.Sites[i].Password
 			}
+		}
+		if secret.ProxyURL != "" {
+			out.Proxy.URL = secret.ProxyURL
 		}
 	}
 	return out, true, nil
 }
 
-// SaveSettings stores the settings with site headers and passwords sealed
-// apart from the readable document.
+// SaveSettings stores the settings with site headers, site passwords, and
+// the proxy URL sealed apart from the readable document. Sealed settings
+// this process cannot open, because the keyring was unavailable, are kept
+// rather than replaced.
 func (s *SQLite) SaveSettings(ctx context.Context, value settings.Settings) error {
 	value.Sites = append([]settings.Site(nil), value.Sites...)
-	bySite := make([]siteSecret, len(value.Sites))
+	secret := sealedSettings{Sites: make([]siteSecret, len(value.Sites)), ProxyURL: value.Proxy.URL}
 	for i := range value.Sites {
-		bySite[i] = siteSecret{Headers: value.Sites[i].Headers, Password: value.Sites[i].Password}
+		secret.Sites[i] = siteSecret{Headers: value.Sites[i].Headers, Password: value.Sites[i].Password}
 		value.Sites[i].Headers, value.Sites[i].Password = nil, ""
 	}
+	value.Proxy.URL = ""
 	doc, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	secretJSON, err := json.Marshal(bySite)
+	secretJSON, err := json.Marshal(secret)
 	if err != nil {
 		return err
 	}
@@ -328,9 +362,26 @@ func (s *SQLite) SaveSettings(ctx context.Context, value settings.Settings) erro
 	if err != nil {
 		return err
 	}
+	var stored string
+	err = s.db.QueryRowContext(ctx, `SELECT secrets FROM settings WHERE id = 1`).Scan(&stored)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("load settings: %w", err)
+	}
+	if !s.readable(stored) {
+		sealed = stored
+	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO settings (id, value, secrets) VALUES (1, ?, ?)
 ON CONFLICT(id) DO UPDATE SET value = excluded.value, secrets = excluded.secrets`, string(doc), sealed); err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}
 	return nil
+}
+
+// readable reports whether a stored value can be opened with this key.
+func (s *SQLite) readable(value string) bool {
+	if s.sealer == nil || value == "" {
+		return true
+	}
+	_, err := s.sealer.Open(value)
+	return !errors.Is(err, secrets.ErrUnreadable)
 }

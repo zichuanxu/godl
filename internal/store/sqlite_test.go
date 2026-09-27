@@ -245,7 +245,30 @@ func TestSQLiteStoreSealsSecrets(t *testing.T) {
 	if got, err := db.Get(ctx, "x"); err != nil || got.Headers != nil {
 		t.Fatalf("foreign key: headers = %v, err = %v", got.Headers, err)
 	}
-	if got, _, err := db.LoadSettings(ctx); err != nil || got.Sites[0].Password != "" || got.Sites[0].Username != "me" {
+	got, _, err := db.LoadSettings(ctx)
+	if err != nil || got.Sites[0].Password != "" || got.Sites[0].Username != "me" {
 		t.Fatalf("foreign key: site = %+v, err = %v", got.Sites[0], err)
+	}
+	// A session with the wrong key goes through transitions and a settings
+	// save; neither may destroy what the right key sealed.
+	item.Status = download.StatusRunning
+	if err := db.Update(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	got.MaxConcurrent = 9
+	if err := db.SaveSettings(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	key[0] = 0
+	db, err = store.Open(path, sealer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item, _ := db.Get(ctx, "x"); item.Headers["Cookie"] != "session=secret" || item.Status != download.StatusRunning {
+		t.Fatalf("after a foreign-key session: %+v", item)
+	}
+	if got, _, _ := db.LoadSettings(ctx); got.Sites[0].Password != "hunter2" || got.MaxConcurrent != 9 {
+		t.Fatalf("after a foreign-key session: settings %+v", got)
 	}
 }

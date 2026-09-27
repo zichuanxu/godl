@@ -28,13 +28,57 @@ export function Add(req: download$0.Request): $CancellablePromise<download$0.Ite
     });
 }
 
+/**
+ * CanConvert reports whether ffmpeg is available for ConvertToMP4.
+ */
+export function CanConvert(): $CancellablePromise<boolean> {
+    return $Call.ByID(1083570277);
+}
+
+/**
+ * ConvertToMP4 remuxes a completed MPEG-TS download into an MP4 next to it,
+ * without re-encoding, and returns the new file's path.
+ */
+export function ConvertToMP4(id: string): $CancellablePromise<string> {
+    return $Call.ByID(2340438253, id);
+}
+
 export function Delete(id: string, removeFiles: boolean): $CancellablePromise<void> {
     return $Call.ByID(1920553007, id, removeFiles);
 }
 
+/**
+ * ExpandBatch returns the URLs a batch pattern such as img[001-120].jpg
+ * describes.
+ */
+export function ExpandBatch(pattern: string): $CancellablePromise<string[]> {
+    return $Call.ByID(4127690252, pattern).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * ExportQueue saves the unfinished downloads to a file the user picks. Request
+ * headers are left out; they often hold session cookies. It returns the
+ * path, or "" when the user cancels.
+ */
+export function ExportQueue(): $CancellablePromise<string> {
+    return $Call.ByID(2600091605);
+}
+
+/**
+ * ImportQueue queues the downloads in an exported file or a list of URLs the
+ * user picks.
+ */
+export function ImportQueue(): $CancellablePromise<$models.ImportResult> {
+    return $Call.ByID(3375714468).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
 export function List(): $CancellablePromise<download$0.Item[]> {
     return $Call.ByID(507861228).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType3($result);
     });
 }
 
@@ -50,7 +94,7 @@ export function Open(id: string): $CancellablePromise<void> {
  */
 export function ParseCurl(command: string): $CancellablePromise<download$0.Request> {
     return $Call.ByID(3295307761, command).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
     });
 }
 
@@ -66,6 +110,14 @@ export function PauseAll(): $CancellablePromise<void> {
 }
 
 /**
+ * PerformWhenDone runs action after the frontend's countdown, unless it was
+ * cancelled meanwhile.
+ */
+export function PerformWhenDone(action: string): $CancellablePromise<void> {
+    return $Call.ByID(986674657, action);
+}
+
+/**
  * PickDirectory asks for a folder and allows downloads into it.
  */
 export function PickDirectory(): $CancellablePromise<string> {
@@ -74,7 +126,7 @@ export function PickDirectory(): $CancellablePromise<string> {
 
 /**
  * Reauthenticate replaces a download's request headers with those of a fresh
- * curl command and retries it; used after a 401 or 403.
+ * curl command for the same host and retries it; used after a 401 or 403.
  */
 export function Reauthenticate(id: string, command: string): $CancellablePromise<void> {
     return $Call.ByID(1039163308, id, command);
@@ -105,7 +157,7 @@ export function Reveal(id: string): $CancellablePromise<void> {
 
 export function SaveSettings(s: settings$0.Settings): $CancellablePromise<settings$0.Settings> {
     return $Call.ByID(884926860, s).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType5($result);
     });
 }
 
@@ -116,15 +168,23 @@ export function SetAutostart(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(1860614361, enabled);
 }
 
+/**
+ * SetWhenDone chooses what happens once no download is queued or running:
+ * "" for nothing, "sleep", or "shutdown". It fires once and then resets.
+ */
+export function SetWhenDone(action: string): $CancellablePromise<void> {
+    return $Call.ByID(1470616364, action);
+}
+
 export function Settings(): $CancellablePromise<settings$0.Settings> {
     return $Call.ByID(3894829833).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType5($result);
     });
 }
 
 export function State(): $CancellablePromise<$models.State> {
     return $Call.ByID(3152233241).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -132,9 +192,18 @@ export function Update(id: string, patch: download$0.Patch): $CancellablePromise
     return $Call.ByID(3428666821, id, patch);
 }
 
+/**
+ * WhenDone returns the pending action.
+ */
+export function WhenDone(): $CancellablePromise<string> {
+    return $Call.ByID(1967386564);
+}
+
 // Private type creation functions
 const $$createType0 = download$0.Item.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = download$0.Request.createFrom;
-const $$createType3 = settings$0.Settings.createFrom;
-const $$createType4 = $models.State.createFrom;
+const $$createType1 = $Create.Array($Create.Any);
+const $$createType2 = $models.ImportResult.createFrom;
+const $$createType3 = $Create.Array($$createType0);
+const $$createType4 = download$0.Request.createFrom;
+const $$createType5 = settings$0.Settings.createFrom;
+const $$createType6 = $models.State.createFrom;

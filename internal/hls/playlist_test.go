@@ -165,7 +165,7 @@ func TestDetect(t *testing.T) {
 	}{
 		{"application/vnd.apple.mpegurl", "http://h/x", "", true},
 		{"Application/X-MpegURL; charset=utf-8", "http://h/x", "", true},
-		{"audio/mpegurl", "http://h/x", "", true},
+		{"audio/mpegurl", "http://h/x", "", false}, // plain M3U radio
 		{"application/octet-stream", "http://h/Live/Index.M3U8?tok=1", "", true},
 		{"text/plain", "http://h/x.txt", "#EXTM3U\n", true},
 		{"text/plain", "http://h/x.txt", "\xef\xbb\xbf#EXTM3U\n", true},

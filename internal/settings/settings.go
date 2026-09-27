@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -43,6 +44,11 @@ type Desktop struct {
 	// AskDirectory asks for a folder on every add instead of using the
 	// category folders.
 	AskDirectory bool `json:"askDirectory"`
+	// OpenWhenDone opens each file with its default app when it completes.
+	OpenWhenDone bool `json:"openWhenDone"`
+	// FFmpeg is the ffmpeg executable for converting streams to MP4; empty
+	// means ffmpeg on PATH.
+	FFmpeg string `json:"ffmpeg,omitempty"`
 }
 
 // Schedule runs the queue only between Start and Stop ("HH:MM" local time,
@@ -75,7 +81,8 @@ type Site struct {
 // saving it back keeps the stored password.
 const Masked = "********"
 
-// Masked returns the settings with site passwords replaced by Masked.
+// Masked returns the settings with site passwords and the proxy password
+// replaced by Masked.
 func (s Settings) Masked() Settings {
 	s.Sites = append([]Site(nil), s.Sites...)
 	for i := range s.Sites {
@@ -83,12 +90,18 @@ func (s Settings) Masked() Settings {
 			s.Sites[i].Password = Masked
 		}
 	}
+	if u, err := url.Parse(s.Proxy.URL); err == nil && u.User != nil {
+		if _, ok := u.User.Password(); ok {
+			u.User = url.UserPassword(u.User.Username(), Masked)
+			s.Proxy.URL = u.String()
+		}
+	}
 	return s
 }
 
-// Unmask restores passwords that a client sent back as Masked from stored,
-// matching sites by host.
-func (s Settings) Unmask(stored Settings) Settings {
+// Unmask restores the passwords that a client sent back as Masked from
+// stored, matching sites by host.
+func (s Settings) Unmask(stored Settings) (Settings, error) {
 	s.Sites = append([]Site(nil), s.Sites...)
 	for i := range s.Sites {
 		if s.Sites[i].Password != Masked {
@@ -100,8 +113,25 @@ func (s Settings) Unmask(stored Settings) Settings {
 				s.Sites[i].Password = old.Password
 			}
 		}
+		if s.Sites[i].Password == "" {
+			return s, fmt.Errorf("site %s: its password was renamed or removed; enter it again", s.Sites[i].Host)
+		}
 	}
-	return s
+	if u, err := url.Parse(s.Proxy.URL); err == nil && u.User != nil {
+		if pass, _ := u.User.Password(); pass == Masked {
+			old, err := url.Parse(stored.Proxy.URL)
+			storedPass := ""
+			if err == nil && old.User != nil {
+				storedPass, _ = old.User.Password()
+			}
+			if storedPass == "" {
+				return s, errors.New("proxy password was removed; enter it again")
+			}
+			u.User = url.UserPassword(u.User.Username(), storedPass)
+			s.Proxy.URL = u.String()
+		}
+	}
+	return s, nil
 }
 
 func Default() Settings {

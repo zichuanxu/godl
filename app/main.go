@@ -23,8 +23,8 @@ func main() {
 	desk := &Desktop{}
 	services := []application.Service{application.NewService(desk)}
 	if notifier := newNotifier(); notifier != nil {
-		desk.notifier = notifier
-		services = append(services, application.NewService(notifier))
+		desk.notifier.Store(notifier)
+		services = append(services, application.NewService(&optionalNotifier{NotificationService: notifier, desk: desk}))
 	}
 	app := application.New(application.Options{
 		Name:        "godl",

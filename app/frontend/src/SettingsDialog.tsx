@@ -142,8 +142,16 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
               Always ask where to save
             </label>
             <label className="check">
+              <input type="checkbox" checked={s.desktop.openWhenDone} onChange={(e) => set({ desktop: { ...s.desktop, openWhenDone: e.target.checked } })} />
+              Open files when they finish
+            </label>
+            <label className="check">
               <input type="checkbox" checked={autostart} onChange={(e) => setAutostart(e.target.checked)} />
               Start godl when I log in
+            </label>
+            <label>
+              ffmpeg for “Convert to MP4” (empty: find it on PATH)
+              <input placeholder="/opt/homebrew/bin/ffmpeg" value={s.desktop.ffmpeg ?? ""} onChange={(e) => set({ desktop: { ...s.desktop, ffmpeg: e.target.value } })} />
             </label>
             {(s.extraRoots ?? []).length > 0 && (
               <p className="note">Folders you picked: {(s.extraRoots ?? []).join(", ")}</p>

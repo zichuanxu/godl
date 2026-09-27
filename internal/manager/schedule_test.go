@@ -262,6 +262,14 @@ func TestAddNamesFromServerAndAvoidsCollisions(t *testing.T) {
 	if filepath.Base(second.Destination) != "_Report (1).pdf" {
 		t.Fatalf("second destination = %q", second.Destination)
 	}
+	h.runner.remote = download.Remote{URL: "https://cdn.test/live/master.m3u8", ContentType: "application/vnd.apple.mpegurl"}
+	stream, err := h.m.Add(context.Background(), download.Request{URL: "https://a.test/watch?v=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(h.root, "Video", "master.ts"); stream.Destination != want {
+		t.Fatalf("HLS destination = %q, want %q", stream.Destination, want)
+	}
 	h.runner.remote = download.Remote{}
 	dir := filepath.Join(h.root, "picked")
 	third, err := h.m.Add(context.Background(), download.Request{URL: "https://a.test/files/movie.mkv", Directory: dir, Priority: download.PriorityHigh})
@@ -270,5 +278,33 @@ func TestAddNamesFromServerAndAvoidsCollisions(t *testing.T) {
 	}
 	if third.Destination != filepath.Join(dir, "movie.mkv") || third.Priority != 1 {
 		t.Fatalf("third = %+v", third)
+	}
+}
+
+// Only AddExtraRoot widens confinement; settings updates can only narrow it.
+func TestExtraRootsAreServerOwned(t *testing.T) {
+	h := newHarness(t, settings.Default(), nil)
+	outside := t.TempDir()
+	s := h.m.Settings()
+	s.ExtraRoots = []string{outside}
+	if err := h.m.UpdateSettings(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.m.Settings().ExtraRoots) != 0 {
+		t.Fatal("a settings update added an extra root")
+	}
+	if _, err := h.m.Add(context.Background(), download.Request{URL: "https://a.test/f", Destination: filepath.Join(outside, "f")}); !errors.Is(err, download.ErrInvalidDownload) {
+		t.Fatalf("destination outside the roots: err = %v", err)
+	}
+	if err := h.m.AddExtraRoot(context.Background(), outside); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.Add(context.Background(), download.Request{URL: "https://a.test/f", Destination: filepath.Join(outside, "f")}); err != nil {
+		t.Fatalf("destination in a picked folder: %v", err)
+	}
+	s = h.m.Settings()
+	s.ExtraRoots = nil
+	if err := h.m.UpdateSettings(context.Background(), s); err != nil || len(h.m.Settings().ExtraRoots) != 0 {
+		t.Fatalf("removing the picked folder: %v %v", err, h.m.Settings().ExtraRoots)
 	}
 }

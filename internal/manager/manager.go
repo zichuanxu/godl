@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/hls"
 	"github.com/zichuanxu/godl/internal/logging"
 	"github.com/zichuanxu/godl/internal/settings"
 	"golang.org/x/time/rate"
@@ -173,13 +175,45 @@ func (m *Manager) Settings() settings.Settings {
 
 // UpdateSettings validates, stores, and applies new settings. Site passwords
 // sent back as settings.Masked keep their stored value.
+//
+// Folders picked in the GUI (ExtraRoots) widen destination confinement, so
+// clients may only remove them; AddExtraRoot adds one.
 func (m *Manager) UpdateSettings(ctx context.Context, s settings.Settings) error {
-	s = s.Unmask(m.Settings())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current := m.Settings()
+	s, err := s.Unmask(current)
+	if err != nil {
+		return fmt.Errorf("%w: %w", download.ErrInvalidSettings, err)
+	}
+	kept := []string{}
+	for _, dir := range s.ExtraRoots {
+		if slices.Contains(current.ExtraRoots, dir) {
+			kept = append(kept, dir)
+		}
+	}
+	s.ExtraRoots = kept
+	return m.saveSettings(ctx, s)
+}
+
+// AddExtraRoot allows downloads under dir, a folder the user picked in the
+// GUI.
+func (m *Manager) AddExtraRoot(ctx context.Context, dir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.Settings()
+	if slices.Contains(s.ExtraRoots, dir) {
+		return nil
+	}
+	s.ExtraRoots = append(slices.Clone(s.ExtraRoots), dir)
+	return m.saveSettings(ctx, s)
+}
+
+// saveSettings validates, stores, and applies s. The caller holds m.mu.
+func (m *Manager) saveSettings(ctx context.Context, s settings.Settings) error {
 	if err := s.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", download.ErrInvalidSettings, err)
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.repo.SaveSettings(ctx, s); err != nil {
 		return err
 	}
@@ -343,6 +377,9 @@ func (m *Manager) Update(ctx context.Context, id string, p download.Patch) error
 			item.SpeedLimit = limit
 		}
 		if p.Headers != nil {
+			if err := m.repo.UpdateHeaders(ctx, id, *p.Headers); err != nil {
+				return err
+			}
 			item.Headers = *p.Headers
 		}
 		if j, ok := m.active[id]; ok {
@@ -765,12 +802,17 @@ func (m *Manager) resolveName(ctx context.Context, rawURL string, headers http.H
 	remote, err := m.runner.Inspect(ctx, rawURL, headers)
 	if err != nil {
 		m.log.Warn("inspect download for its name", "url", logging.RedactURL(rawURL), "err", err)
-		return fileName("", rawURL)
+		remote = download.Remote{}
 	}
 	if remote.URL == "" {
 		remote.URL = rawURL
 	}
-	return fileName(remote.Filename, remote.URL)
+	name := fileName(remote.Filename, remote.URL)
+	// An HLS playlist is saved as the MPEG-TS stream it describes.
+	if hls.Detect(remote.ContentType, remote.URL, nil) {
+		name = strings.TrimSuffix(name, filepath.Ext(name)) + ".ts"
+	}
+	return name
 }
 
 // headers merges the site's headers and credentials with the download's own.

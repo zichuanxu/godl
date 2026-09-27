@@ -88,9 +88,11 @@ func (o *Options) normalize() {
 
 type downloader struct {
 	opts Options
-	prog *tracker
-	mu   sync.Mutex
-	keys map[string]*keyEntry
+	// origin is the playlist's host, the only one that gets every header.
+	origin string
+	prog   *tracker
+	mu     sync.Mutex
+	keys   map[string]*keyEntry
 }
 
 type keyEntry struct {
@@ -114,6 +116,9 @@ func Download(ctx context.Context, rawURL, dest string, opts Options, progress f
 	}
 
 	d := &downloader{opts: opts, prog: &tracker{cb: progress}, keys: map[string]*keyEntry{}}
+	if u, err := url.Parse(rawURL); err == nil {
+		d.origin = u.Hostname()
+	}
 	items, err := d.resolve(ctx, rawURL)
 	if err != nil {
 		return err
@@ -148,7 +153,7 @@ func Discard(dest string) error {
 		return err
 	}
 	defer release()
-	if err := os.RemoveAll(dest + ".hls"); err != nil {
+	if err := removeWorkDir(dest + ".hls"); err != nil {
 		return err
 	}
 	if err := os.Remove(dest + ".part"); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -162,7 +167,8 @@ func Discard(dest string) error {
 func Detect(contentType, rawURL string, head []byte) bool {
 	if mt, _, err := mime.ParseMediaType(contentType); err == nil {
 		switch mt {
-		case "application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl":
+		// Not audio/mpegurl: plain M3U radio playlists use it too.
+		case "application/vnd.apple.mpegurl", "application/x-mpegurl":
 			return true
 		}
 	}
@@ -183,7 +189,7 @@ func lock(dest string) (func() error, error) {
 // resolve fetches the playlist, following a master playlist to its best variant.
 func (d *downloader) resolve(ctx context.Context, rawURL string) ([]item, error) {
 	for range 2 {
-		body, final, err := d.get(ctx, rawURL, 0, -1, false)
+		body, final, err := d.get(ctx, rawURL)
 		if err != nil {
 			return nil, fmt.Errorf("playlist: %w", err)
 		}
@@ -226,7 +232,8 @@ feed:
 	return context.Cause(ctx)
 }
 
-// fetchItem downloads and decrypts one item into the work dir.
+// fetchItem streams one item to a temporary file in the work dir, decrypts
+// it into its segment file, and renames that into place.
 func (d *downloader) fetchItem(ctx context.Context, work string, i int, it item) error {
 	var key []byte
 	if it.KeyURI != "" {
@@ -235,18 +242,35 @@ func (d *downloader) fetchItem(ctx context.Context, work string, i int, it item)
 			return err
 		}
 	}
-	body, _, err := d.get(ctx, it.URI, it.Off, it.Len, true)
+	raw, err := os.CreateTemp(work, ".dl-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(raw.Name())
+	defer raw.Close()
+	_, size, err := d.fetch(ctx, it.URI, it.Off, it.Len, true, -1, fileSink{raw})
 	if err != nil {
 		return fmt.Errorf("segment %d: %w", i, err)
 	}
-	size := int64(len(body))
+	out := raw
 	if key != nil {
-		if body, err = decrypt(body, key, it.IV); err != nil {
+		if out, err = os.CreateTemp(work, ".dec-*"); err != nil {
+			return err
+		}
+		defer os.Remove(out.Name())
+		defer out.Close()
+		if err := decryptFile(raw, out, size, key, it.IV); err != nil {
 			return fmt.Errorf("segment %d: %w", i, err)
 		}
 	}
-	if err := writeFileSynced(segPath(work, i), body); err != nil {
+	if err := out.Sync(); err != nil {
 		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(out.Name(), segPath(work, i)); err != nil {
+		return fmt.Errorf("segment %d: %w", i, err)
 	}
 	d.prog.finish(size)
 	return nil
@@ -262,7 +286,7 @@ func (d *downloader) key(ctx context.Context, uri string) ([]byte, error) {
 	}
 	d.mu.Unlock()
 	e.once.Do(func() {
-		body, _, err := d.get(ctx, uri, 0, -1, false)
+		body, _, err := d.get(ctx, uri)
 		switch {
 		case err != nil:
 			e.err = fmt.Errorf("key %s: %w", uri, err)
@@ -275,44 +299,94 @@ func (d *downloader) key(ctx context.Context, uri string) ([]byte, error) {
 	return e.key, e.err
 }
 
-// decrypt reverses AES-128-CBC with PKCS#7 padding in place.
-func decrypt(data, key, iv []byte) ([]byte, error) {
-	if len(data) == 0 || len(data)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("decrypt: ciphertext length %d is not a positive multiple of 16", len(data))
+// decryptFile reverses AES-128-CBC with PKCS#7 padding, streaming size
+// bytes of in to out; only the final block's padding is held back.
+func decryptFile(in *os.File, out io.Writer, size int64, key, iv []byte) error {
+	if size == 0 || size%aes.BlockSize != 0 {
+		return fmt.Errorf("decrypt: ciphertext length %d is not a positive multiple of 16", size)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt: %w", err)
+		return fmt.Errorf("decrypt: %w", err)
 	}
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(data, data)
-	p := int(data[len(data)-1])
-	if p == 0 || p > aes.BlockSize || !bytes.Equal(data[len(data)-p:], bytes.Repeat([]byte{byte(p)}, p)) {
-		return nil, errors.New("decrypt: bad PKCS#7 padding (wrong key or IV?)")
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return err
 	}
-	return data[:len(data)-p], nil
+	mode := cipher.NewCBCDecrypter(block, iv)
+	buf := make([]byte, 64<<10) // a multiple of the block size
+	for left := size; left > 0; {
+		chunk := buf[:min(int64(len(buf)), left)]
+		if _, err := io.ReadFull(in, chunk); err != nil {
+			return fmt.Errorf("decrypt: %w", err)
+		}
+		mode.CryptBlocks(chunk, chunk)
+		if left -= int64(len(chunk)); left == 0 {
+			p := int(chunk[len(chunk)-1])
+			if p == 0 || p > aes.BlockSize || !bytes.Equal(chunk[len(chunk)-p:], bytes.Repeat([]byte{byte(p)}, p)) {
+				return errors.New("decrypt: bad PKCS#7 padding (wrong key or IV?)")
+			}
+			chunk = chunk[:len(chunk)-p]
+		}
+		if _, err := out.Write(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func segPath(work string, i int) string { return filepath.Join(work, fmt.Sprintf("%06d.seg", i)) }
 
 // prepareWorkDir keeps the work dir only if it belongs to the same playlist.
+// The fingerprint leaves out query strings, which often carry expiring
+// tokens: a re-fetched playlist with fresh tokens still resumes, and its
+// fresh URLs are used for the remaining segments.
 func prepareWorkDir(work string, items []item) error {
-	raw, err := json.Marshal(items)
+	stable := make([]item, len(items))
+	for i, it := range items {
+		it.URI, it.KeyURI = withoutQuery(it.URI), withoutQuery(it.KeyURI)
+		stable[i] = it
+	}
+	raw, err := json.Marshal(stable)
 	if err != nil {
 		return err
 	}
 	sum := sha256.Sum256(raw)
 	state, _ := json.Marshal(map[string]string{"fingerprint": hex.EncodeToString(sum[:])})
 	statePath := filepath.Join(work, "state.json")
-	if got, err := os.ReadFile(statePath); err == nil && bytes.Equal(got, state) {
+	got, err := os.ReadFile(statePath)
+	if err == nil && bytes.Equal(got, state) {
 		return nil
 	}
-	if err := os.RemoveAll(work); err != nil {
-		return fmt.Errorf("discard stale work dir: %w", err)
+	if err := removeWorkDir(work); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return fmt.Errorf("create work dir: %w", err)
 	}
 	return writeFileSynced(statePath, state)
+}
+
+// removeWorkDir deletes work only if it is godl's: it holds state.json.
+func removeWorkDir(work string) error {
+	if _, err := os.Lstat(work); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if _, err := os.Lstat(filepath.Join(work, "state.json")); err != nil {
+		return fmt.Errorf("%s exists and is not a godl download directory", work)
+	}
+	if err := os.RemoveAll(work); err != nil {
+		return fmt.Errorf("discard stale work dir: %w", err)
+	}
+	return nil
+}
+
+func withoutQuery(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.RawQuery, u.Fragment = "", ""
+	return u.String()
 }
 
 // writeFileSynced writes path atomically: temp file, fsync, rename.

@@ -56,8 +56,9 @@ func Open() (*Sealer, error) {
 }
 
 // keyringTimeout bounds a keyring that never answers, such as a macOS
-// keychain waiting on a dialog nobody sees.
-const keyringTimeout = 15 * time.Second
+// keychain waiting on a dialog nobody sees; it leaves time to type a password
+// into the prompt that follows an app update.
+const keyringTimeout = 60 * time.Second
 
 // keyWithTimeout reads the key, giving up after d.
 // ponytail: a timed-out keyring call keeps running in the background.

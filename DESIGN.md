@@ -57,7 +57,8 @@ no Windows service).
 ```text
 internal/engine/   engine.go scheduler.go ranged.go single.go checkpoint.go checksum.go
                    retry.go transport.go prealloc_*.go diskfree_*.go runner.go
-internal/hls/      playlist.go decrypt.go concat.go
+internal/hls/      hls.go playlist.go fetch.go
+internal/remux/    optional system-ffmpeg remux
 internal/manager/  manager.go filename.go destination.go
 internal/settings/ settings.go (settings document, schedule rules)
 internal/netproxy/ manual and system proxy
@@ -191,7 +192,14 @@ tracks are separate and need a muxer.
 
 HLS resume granularity is **whole segments**. AES-128 key fetch and decryption are
 included. MPEG-TS segments are concatenated byte-for-byte into a playable `.ts`; fMP4
-segments are concatenated after their init segment.
+segments are concatenated after their init segment. Segments stream to disk (never
+whole in memory) and finished ones are kept in a `dest.hls/` directory, fingerprinted by
+the playlist without query strings, so a playlist re-fetched with fresh CDN tokens still
+resumes; a structurally changed playlist restarts the download. Request headers go only
+to the playlist's host; segment and key hosts named by the playlist get portable headers
+only. The engine hands a URL ending in `.m3u8`, or a
+probe answered with an HLS `Content-Type`, to the HLS source. Separate audio and
+subtitle renditions (`EXT-X-MEDIA`) are not downloaded.
 
 ### 3.8 Integrity
 

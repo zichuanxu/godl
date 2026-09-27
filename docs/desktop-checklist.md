@@ -42,6 +42,21 @@ from a clean data directory (`~/Library/Application Support/godl` or
 - [ ] "Always ask where to save" opens the folder picker on Add.
 - [ ] "Start godl when I log in" registers the app (check after logging out and in).
 
+## Extras (M4)
+
+- [ ] Add `https://…/img[001-005].jpg`: the dialog shows "Batch pattern: 5 URLs" and queues five downloads.
+- [ ] Export writes a JSON file without cookies; Import of that file, and of a text file of URLs, queues them again.
+- [ ] "When done: Sleep" with a short download: a 30 s countdown appears when the queue empties; Cancel stops it; letting it run puts the computer to sleep once, and the choice resets to Nothing.
+- [ ] "When done: Shut down" shows the same countdown (cancel it, or test on a VM).
+- [ ] "Open files when they finish" opens each completed file.
+
+## HLS (M5)
+
+- [ ] Add a VOD `.m3u8` URL: it downloads as one `.ts` file in `Video` that plays in VLC or QuickTime (via MP4 conversion).
+- [ ] An AES-128 encrypted stream plays after download.
+- [ ] Pause and resume an HLS download: it continues from the finished segments.
+- [ ] With ffmpeg installed, "Convert to MP4" creates a playable `.mp4` next to the `.ts`; without ffmpeg the button is hidden.
+
 ## Secrets
 
 - [ ] After adding a download with a cookie, the cookie value does not appear in `godl.db` (for example `strings godl.db | grep <value>` finds nothing).

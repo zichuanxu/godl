@@ -9,9 +9,11 @@ The engine splits a download across up to 32 HTTP/1.1 connections and rebalances
 
 The service queue orders downloads by priority, shares a per-host connection cap across downloads, applies global and per-download speed limits (including time-of-day rules and a queue window), names files from the server, and connects through a manual or the system proxy.
 
-The desktop app (macOS and Windows) runs the same service in-process, with a tray icon, notifications, drag and drop, cURL import, and a clipboard monitor.
+HLS streams (`.m3u8`, including AES-128 encryption) download as one playable `.ts` file with per-segment resume; with ffmpeg installed, the desktop app converts them to MP4 without re-encoding.
 
-The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M3 (desktop GUI)**; installers arrive with v1.0 (M6).
+The desktop app (macOS and Windows) runs the same service in-process, with a tray icon, notifications, drag and drop, cURL import, a clipboard monitor, batch URL patterns, queue import and export, and sleep or shut down when the queue is done.
+
+The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M5 (HLS)**; installers arrive with v1.0 (M6).
 
 ## Requirements
 
@@ -53,6 +55,8 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
 cd app && wails3 generate bindings -clean=true -ts -f '-tags production'
 ```
 
+Beyond the CLI's features, the app offers "When done: Sleep / Shut down" (after a 30-second cancellable countdown, once, and only when downloads finish rather than pause; on macOS, shutting down needs the Automation permission requested when you pick it), opening media and documents when they finish (other files are revealed instead), and "Convert to MP4" for finished `.ts` streams using ffmpeg from `PATH` or Settings (ffmpeg is never bundled).
+
 The app embeds the download service and still serves the loopback API, so the CLI commands below work while it runs; a separate `godl service` must not be running at the same time. Closing the window keeps downloads going in the tray; Quit stops them after they checkpoint. Logs go to `godl.log` in the data directory. [docs/desktop-checklist.md](docs/desktop-checklist.md) is the manual test list.
 
 ## Direct downloader
@@ -85,7 +89,11 @@ The `download` command runs the engine without the service:
 ./godl download --resume-key 'bucket/object/version-42' SIGNED_URL OUTPUT
 ```
 
-While a transfer is active the engine keeps `OUTPUT.part`, `OUTPUT.part.meta`, and `OUTPUT.lock`. The lock is an OS advisory lock, so a crashed or killed process never leaves a lock that blocks the next run. The engine checks free space and preallocates the file before downloading.
+An HLS playlist, recognised by a `.m3u8` URL or an HLS `Content-Type`, is downloaded segment by segment into one MPEG-TS file (fMP4 streams get their init segment first). A master playlist picks its highest-bandwidth variant; live streams and SAMPLE-AES are refused. Separate audio and subtitle renditions are not downloaded, and an fMP4 stream keeps the `.ts` name chosen before its playlist is read (convert it to MP4 for players that trust extensions). Cookies and other request headers are sent only to the playlist's host.
+
+Completed files are marked as downloaded from the internet (the `com.apple.quarantine` attribute on macOS, a `Zone.Identifier` stream on Windows), so Gatekeeper and SmartScreen check downloaded programs as they would a browser download.
+
+While a transfer is active the engine keeps `OUTPUT.part`, `OUTPUT.part.meta`, and `OUTPUT.lock` (for HLS, finished segments in `OUTPUT.hls/`). The lock is an OS advisory lock, so a crashed or killed process never leaves a lock that blocks the next run. The engine checks free space and preallocates the file before downloading.
 
 When parallel download and resume apply:
 
@@ -128,7 +136,12 @@ Client commands read the same token file and talk to `http://127.0.0.1:51000` un
 ./godl delete <id> --files
 ./godl settings get > settings.json
 ./godl settings set settings.json
+./godl add --batch 'https://example.com/photos/img[001-120].jpg' --dir ~/Downloads/photos
+./godl export queue.json                                   # unfinished downloads, never their headers
+./godl import queue.json                                   # or a text file with one URL per line
 ```
+
+Batch patterns expand left to right: `[1-10]`, zero-padded `[001-120]`, stepped `[0-100:5]`, letters `[a-z]`, and alternatives `{cd,dvd}`, up to 10,000 URLs.
 
 Without `OUTPUT`, the file name comes from `Content-Disposition` (including RFC 5987 `filename*`), then the URL path, then the host. It is sanitized (no path separators, `..`, control characters, or Windows reserved names; at most 200 bytes) and placed in `--dir`, or in a category folder under the first download root: `Video`, `Music`, `Documents`, `Compressed`, or `Programs` by extension, the root itself otherwise. A name that is taken on disk or by another queued download becomes `name (1).ext`.
 
@@ -213,7 +226,7 @@ A client that falls behind is disconnected and should reconnect for a fresh snap
 ## Repository layout
 
 ```text
-cmd/godl/             Cobra CLI: service, add, list, set, pause, resume, retry, delete, settings, download, version
+cmd/godl/             Cobra CLI: service, add, list, set, pause, resume, retry, delete, settings, export, import, download, version
 internal/download/    Shared queue model, errors, and event contract
 internal/engine/      Download engine: work-stealing ranges, checkpoints, validation
 internal/filelock/    OS advisory file locks
@@ -222,7 +235,11 @@ internal/store/       SQLite persistence
 internal/manager/     Queue, priorities, host caps, limits, schedule, naming, confinement
 internal/settings/    Settings document and schedule rules
 internal/netproxy/    Manual and system proxy selection
-internal/hls/         HLS playlists, AES-128, and segment concatenation (wired in M5)
+internal/hls/         HLS playlists, AES-128, TS/fMP4 concatenation, segment resume
+internal/remux/       Optional ffmpeg remux of .ts to .mp4
+internal/batch/       Batch URL patterns
+internal/queuefile/   Queue import and export
+internal/power/       Sleep and shut down
 internal/secrets/     AES-GCM sealing with a key in the OS keyring
 internal/curlimport/  "Copy as cURL" parser
 internal/api/         Authenticated loopback JSON and SSE API

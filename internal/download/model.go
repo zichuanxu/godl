@@ -118,6 +118,8 @@ type Repository interface {
 	// so a periodic flush can never overwrite a newer terminal status.
 	UpdateProgress(ctx context.Context, id string, completed, total int64) error
 	Delete(context.Context, string) error
+	// UpdateHeaders replaces the request headers; Update never writes them.
+	UpdateHeaders(ctx context.Context, id string, headers map[string]string) error
 	// LoadSettings returns the stored settings, or ok=false when none are.
 	LoadSettings(context.Context) (s settings.Settings, ok bool, err error)
 	SaveSettings(context.Context, settings.Settings) error

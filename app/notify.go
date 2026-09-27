@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"log"
 	"os"
 	"runtime"
 	"strings"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
@@ -19,4 +22,28 @@ func newNotifier() *notifications.NotificationService {
 		}
 	}
 	return notifications.New()
+}
+
+// optionalNotifier starts the notification service without letting its
+// failure stop the app: Wails aborts when any service fails to start.
+type optionalNotifier struct {
+	*notifications.NotificationService
+	desk   *Desktop
+	failed bool
+}
+
+func (o *optionalNotifier) ServiceStartup(ctx context.Context, opts application.ServiceOptions) error {
+	if err := o.NotificationService.ServiceStartup(ctx, opts); err != nil {
+		log.Printf("notifications unavailable: %v", err)
+		o.failed = true
+		o.desk.notifier.Store(nil)
+	}
+	return nil
+}
+
+func (o *optionalNotifier) ServiceShutdown() error {
+	if o.failed {
+		return nil
+	}
+	return o.NotificationService.ServiceShutdown()
 }

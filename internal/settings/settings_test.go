@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,9 +98,22 @@ func TestMaskedPasswordsRoundTrip(t *testing.T) {
 	if shown.Sites[0].Password != Masked || shown.Sites[1].Password != "" || stored.Sites[0].Password != "secret" {
 		t.Fatalf("masked = %+v (stored %+v)", shown.Sites, stored.Sites)
 	}
+	back, err := shown.Unmask(stored)
+	if err != nil || back.Sites[0].Password != "secret" {
+		t.Fatalf("unmasked = %+v, %v", back.Sites, err)
+	}
 	shown.Sites = append(shown.Sites, Site{Host: "c.test", Password: Masked})
-	back := shown.Unmask(stored)
-	if back.Sites[0].Password != "secret" || back.Sites[2].Password != "" {
-		t.Fatalf("unmasked = %+v", back.Sites)
+	if _, err := shown.Unmask(stored); err == nil {
+		t.Fatal("a masked password without a stored one was accepted")
+	}
+
+	stored.Proxy.URL = "socks5://me:pw@proxy.test:1080"
+	shown = stored.Masked()
+	if strings.Contains(shown.Proxy.URL, "pw") || !strings.Contains(shown.Proxy.URL, "me:") {
+		t.Fatalf("proxy URL not masked: %s", shown.Proxy.URL)
+	}
+	shown.Sites = shown.Sites[:2]
+	if back, err := shown.Unmask(stored); err != nil || back.Proxy.URL != stored.Proxy.URL {
+		t.Fatalf("proxy unmask = %q, %v", back.Proxy.URL, err)
 	}
 }

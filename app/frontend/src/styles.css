@@ -111,3 +111,6 @@ td.progress { display: flex; align-items: center; gap: 8px; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; margin: 0; }
 legend { padding: 0 4px; font-weight: 600; }
 code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+label.inline { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+label.inline select { width: auto; padding: 3px 6px; }
+.toast { white-space: pre-wrap; }

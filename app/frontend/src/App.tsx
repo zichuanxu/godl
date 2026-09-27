@@ -29,6 +29,10 @@ export default function App() {
   const [clip, setClip] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [history, setHistory] = useState<number[]>([]);
+  const [whenDone, setWhenDone] = useState("");
+  const [canConvert, setCanConvert] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [countdown, setCountdown] = useState<{ action: string; left: number } | null>(null);
   const samples = useRef(new Map<string, Sample>());
   const [, setTick] = useState(0);
 
@@ -45,6 +49,8 @@ export default function App() {
 
   useEffect(() => {
     Desktop.State().then(setState).catch(fail);
+    Desktop.WhenDone().then(setWhenDone).catch(() => {});
+    Desktop.CanConvert().then(setCanConvert).catch(() => {});
     reload();
     const offDownload = Events.On("download", (ev) => {
       const e = ev.data;
@@ -73,7 +79,9 @@ export default function App() {
       setItems((prev) => new Map(prev).set(item.id, item));
     });
     const offResync = Events.On("resync", () => reload());
+    const offStopped = Events.On("stopped", () => Desktop.State().then(setState).catch(fail));
     const offClip = Events.On("clipboard", (ev) => setClip(ev.data));
+    const offDone = Events.On("queue-done", (ev) => setCountdown({ action: ev.data, left: 30 }));
     const timer = window.setInterval(() => {
       const now = performance.now();
       let total = 0;
@@ -87,10 +95,42 @@ export default function App() {
     return () => {
       offDownload();
       offResync();
+      offStopped();
       offClip();
+      offDone();
       window.clearInterval(timer);
     };
   }, [reload, fail]);
+
+  // The completion action runs when the countdown reaches zero unless cancelled.
+  useEffect(() => {
+    if (!countdown) return;
+    if (countdown.left <= 0) {
+      setCountdown(null);
+      setWhenDone("");
+      Desktop.PerformWhenDone(countdown.action).catch(fail);
+      return;
+    }
+    const t = window.setTimeout(() => setCountdown({ ...countdown, left: countdown.left - 1 }), 1000);
+    return () => window.clearTimeout(t);
+  }, [countdown, fail]);
+
+  const chooseWhenDone = (action: string) => {
+    setWhenDone(action);
+    Desktop.SetWhenDone(action).catch((err) => {
+      setWhenDone("");
+      fail(err);
+    });
+  };
+
+  const importQueue = async () => {
+    try {
+      const res = await Desktop.ImportQueue();
+      if (res.failed?.length) setToast(`Added ${res.added}; not added:\n${res.failed.join("\n")}`);
+    } catch (err) {
+      fail(err);
+    }
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -98,7 +138,8 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const rows = useMemo(() => [...items.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [items]);
+  // RFC 3339 strings with trimmed fractions do not sort as text.
+  const rows = useMemo(() => [...items.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)), [items]);
   const current = selected ? items.get(selected) : undefined;
   const totalSpeed = history.length ? history[history.length - 1] : 0;
   const active = rows.filter((i) => i.status === Status.StatusRunning).length;
@@ -116,7 +157,7 @@ export default function App() {
     }
   };
 
-  const needsAuth = (item?: Item) => !!item && item.status === Status.StatusFailed && /\b(401|403)\b/.test(item.error ?? "");
+  const needsAuth = (item?: Item) => !!item && item.status === Status.StatusFailed && /HTTP (401|403)\b/.test(item.error ?? "");
 
   return (
     <div className="app" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
@@ -136,7 +177,31 @@ export default function App() {
         <button disabled={!current || current.status !== Status.StatusCompleted} onClick={run(() => Desktop.Open(current!.id))}>Open</button>
         <button disabled={!current} onClick={run(() => Desktop.Reveal(current!.id))}>Show in folder</button>
         {needsAuth(current) && <button onClick={() => setReauth(current!)}>Re-authenticate</button>}
+        {canConvert && current?.status === Status.StatusCompleted && /\.ts$/i.test(current.destination) && (
+          <button
+            disabled={converting}
+            onClick={() => {
+              setConverting(true);
+              Desktop.ConvertToMP4(current.id)
+                .then((out) => setToast(`Saved ${baseName(out)}`))
+                .catch(fail)
+                .finally(() => setConverting(false));
+            }}
+          >
+            {converting ? "Converting…" : "Convert to MP4"}
+          </button>
+        )}
         <span className="grow" />
+        <label className="inline" title="What to do once no download is queued or running">
+          When done
+          <select value={whenDone} onChange={(e) => chooseWhenDone(e.target.value)}>
+            <option value="">Nothing</option>
+            <option value="sleep">Sleep</option>
+            <option value="shutdown">Shut down</option>
+          </select>
+        </label>
+        <button onClick={importQueue}>Import</button>
+        <button onClick={run(() => Desktop.ExportQueue())}>Export</button>
         <button onClick={run(() => Desktop.PauseAll())}>Pause all</button>
         <button onClick={run(() => Desktop.ResumeAll())}>Resume all</button>
         <button onClick={() => setSettingsOpen(true)}>Settings</button>
@@ -213,10 +278,32 @@ export default function App() {
         </div>
       )}
       {toast && <div className="toast" onClick={() => setToast("")}>{toast}</div>}
+      {countdown && (
+        <div className="modal-backdrop">
+          <div className="modal small">
+            <h2>All downloads are done</h2>
+            <p>
+              {countdown.action === "shutdown" ? "Shutting down" : "Going to sleep"} in {countdown.left} s.
+            </p>
+            <div className="actions">
+              <button className="primary" onClick={() => { setCountdown(null); chooseWhenDone(""); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {adding && state && <AddDialog prefill={adding} defaultDirectory={state.defaultDirectory} onClose={() => setAdding(null)} onError={fail} />}
-      {settingsOpen && state && <SettingsDialog state={state} onClose={() => setSettingsOpen(false)} onSaved={() => Desktop.State().then(setState)} />}
-      {deleting && <DeleteDialog item={deleting} onClose={() => setDeleting(null)} onError={fail} />}
+      {settingsOpen && state && (
+        <SettingsDialog
+          state={state}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={() => {
+            Desktop.State().then(setState);
+            Desktop.CanConvert().then(setCanConvert);
+          }}
+        />
+      )}
+      {deleting && <DeleteDialog item={items.get(deleting.id) ?? deleting} onClose={() => setDeleting(null)} onError={fail} />}
       {reauth && <ReauthDialog item={reauth} onClose={() => setReauth(null)} onError={fail} />}
     </div>
   );
@@ -224,10 +311,11 @@ export default function App() {
 
 function DeleteDialog({ item, onClose, onError }: { item: Item; onClose: () => void; onError: (e: unknown) => void }) {
   const [files, setFiles] = useState(false);
-  const running = item.status === Status.StatusRunning;
   const confirm = async () => {
     try {
-      if (running) await Desktop.Pause(item.id);
+      // The status may have changed since the dialog opened; pausing a
+      // stopped download is a harmless conflict.
+      await Desktop.Pause(item.id).catch(() => {});
       // A paused runner may still be checkpointing; retry briefly.
       for (let i = 0; ; i++) {
         try {

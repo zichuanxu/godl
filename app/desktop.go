@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +28,7 @@ const (
 	eventDownload  = "download"  // download.Event
 	eventResync    = "resync"    // events were dropped; reload the list
 	eventClipboard = "clipboard" // a copied URL or curl command
+	eventStopped   = "stopped"   // the service stopped; re-read State
 )
 
 func init() {
@@ -43,19 +43,23 @@ var errNotRunning = errors.New("the download service is not running")
 type Desktop struct {
 	app      *application.App
 	window   *application.WebviewWindow
-	notifier *notifications.NotificationService
+	notifier atomic.Pointer[notifications.NotificationService]
 
-	svc      *service.Service
-	mgr      *manager.Manager
-	log      *slog.Logger
-	logFile  io.Closer
-	startErr error
-	cancel   context.CancelFunc
+	svc     *service.Service
+	mgr     *manager.Manager
+	log     *slog.Logger
+	logFile io.Closer
+	// failure holds why the service is not running, if it is not.
+	failure atomic.Value
+	cancel  context.CancelFunc
 
 	events chan download.Event
 	lagged atomic.Bool
-	// authorize asks once for permission to notify, on first use.
-	authorize sync.Once
+	// notifications are sent from their own goroutine: a pending permission
+	// prompt must not hold up the event stream.
+	notifications chan download.Item
+	// whenDone is the pending completion action (a string).
+	whenDone atomic.Value
 }
 
 // State describes the backend to the frontend.
@@ -83,13 +87,28 @@ func (d *Desktop) ServiceStartup(ctx context.Context, _ application.ServiceOptio
 		}
 	}
 	if err != nil {
-		d.startErr = err
+		d.failure.Store(err.Error())
 		d.log.Error("start service", "err", err)
 		return nil
 	}
 	d.svc, d.mgr = svc, svc.Manager()
+	d.notifications = make(chan download.Item, 64)
 	go d.forward()
+	go d.notifyLoop()
 	go d.watchClipboard(ctx)
+	go func() {
+		err := svc.Wait()
+		if ctx.Err() != nil {
+			return // our own shutdown
+		}
+		msg := "the service stopped unexpectedly"
+		if err != nil {
+			msg = err.Error()
+		}
+		d.failure.Store(msg)
+		d.log.Error("service stopped", "err", err)
+		d.app.Event.Emit(eventStopped)
+	}()
 	return nil
 }
 
@@ -108,9 +127,7 @@ func (d *Desktop) ServiceShutdown() error {
 
 func (d *Desktop) State() State {
 	s := State{Version: version}
-	if d.startErr != nil {
-		s.Error = d.startErr.Error()
-	}
+	s.Error, _ = d.failure.Load().(string)
 	if root, err := service.DefaultDownloadRoot(); err == nil {
 		s.DefaultDirectory = root
 	}
@@ -121,7 +138,7 @@ func (d *Desktop) State() State {
 }
 
 func (d *Desktop) manager() (*manager.Manager, error) {
-	if d.mgr == nil {
+	if d.mgr == nil || d.failure.Load() != nil {
 		return nil, errNotRunning
 	}
 	return d.mgr, nil
@@ -143,9 +160,15 @@ func (d *Desktop) Add(req download.Request) (download.Item, error) {
 	return m.Add(context.Background(), req)
 }
 
-func (d *Desktop) Pause(id string) error  { return d.do(func(m *manager.Manager) error { return m.Pause(context.Background(), id) }) }
-func (d *Desktop) Resume(id string) error { return d.do(func(m *manager.Manager) error { return m.Resume(context.Background(), id) }) }
-func (d *Desktop) Retry(id string) error  { return d.do(func(m *manager.Manager) error { return m.Retry(context.Background(), id) }) }
+func (d *Desktop) Pause(id string) error {
+	return d.do(func(m *manager.Manager) error { return m.Pause(context.Background(), id) })
+}
+func (d *Desktop) Resume(id string) error {
+	return d.do(func(m *manager.Manager) error { return m.Resume(context.Background(), id) })
+}
+func (d *Desktop) Retry(id string) error {
+	return d.do(func(m *manager.Manager) error { return m.Retry(context.Background(), id) })
+}
 
 func (d *Desktop) Delete(id string, removeFiles bool) error {
 	return d.do(func(m *manager.Manager) error { return m.Delete(context.Background(), id, removeFiles) })
@@ -236,11 +259,18 @@ func (d *Desktop) ParseCurl(command string) (download.Request, error) {
 }
 
 // Reauthenticate replaces a download's request headers with those of a fresh
-// curl command and retries it; used after a 401 or 403.
+// curl command for the same host and retries it; used after a 401 or 403.
 func (d *Desktop) Reauthenticate(id, command string) error {
 	r, err := curlimport.Parse(command)
 	if err != nil {
 		return err
+	}
+	item, err := d.item(id)
+	if err != nil {
+		return err
+	}
+	if host(r.URL) != host(item.URL) {
+		return fmt.Errorf("the command is for %s, but the download is from %s", host(r.URL), host(item.URL))
 	}
 	return d.do(func(m *manager.Manager) error {
 		if err := m.Update(context.Background(), id, download.Patch{Headers: &r.Headers}); err != nil {
@@ -256,6 +286,10 @@ func (d *Desktop) Reauthenticate(id, command string) error {
 
 // PickDirectory asks for a folder and allows downloads into it.
 func (d *Desktop) PickDirectory() (string, error) {
+	m, err := d.manager()
+	if err != nil {
+		return "", err
+	}
 	dir, err := d.app.Dialog.OpenFile().
 		SetTitle("Choose a download folder").
 		CanChooseDirectories(true).
@@ -265,21 +299,7 @@ func (d *Desktop) PickDirectory() (string, error) {
 	if err != nil || dir == "" {
 		return "", err
 	}
-	m, err := d.manager()
-	if err != nil {
-		return "", err
-	}
-	s := m.Settings()
-	for _, existing := range s.ExtraRoots {
-		if existing == dir {
-			return dir, nil
-		}
-	}
-	s.ExtraRoots = append(s.ExtraRoots, dir)
-	if err := m.UpdateSettings(context.Background(), s); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return dir, m.AddExtraRoot(context.Background(), dir)
 }
 
 // Open opens a completed download with its default application.
@@ -340,10 +360,12 @@ func (d *Desktop) publish(e download.Event) {
 func (d *Desktop) forward() {
 	running := map[string]bool{}
 	for e := range d.events {
-		if d.lagged.Swap(false) {
+		d.app.Event.Emit(eventDownload, e)
+		// Reload only once the backlog is out, so no stale event lands after
+		// the fresh list.
+		if len(d.events) == 0 && d.lagged.Swap(false) {
 			d.app.Event.Emit(eventResync)
 		}
-		d.app.Event.Emit(eventDownload, e)
 		item := e.Item
 		switch {
 		case e.Type == download.EventDeleted:
@@ -352,34 +374,46 @@ func (d *Desktop) forward() {
 			running[item.ID] = true
 		case running[item.ID] && e.Type == download.EventUpdated:
 			delete(running, item.ID)
-			d.notify(item)
+			select {
+			case d.notifications <- item:
+			default: // a burst of completions; skip the extra banners
+			}
+			d.afterStop(item)
 		}
 	}
 }
 
-func (d *Desktop) notify(item download.Item) {
-	if d.notifier == nil || !d.mgr.Settings().Desktop.Notifications {
-		return
-	}
-	var title string
-	switch item.Status {
-	case download.StatusCompleted:
-		title = "Download complete"
-	case download.StatusFailed:
-		title = "Download failed"
-	default:
-		return
-	}
-	d.authorize.Do(func() {
-		if ok, err := d.notifier.RequestNotificationAuthorization(); !ok || err != nil {
-			d.log.Warn("notifications not authorized", "err", err)
+// notifyLoop announces finished and failed downloads.
+func (d *Desktop) notifyLoop() {
+	authorized := false
+	for item := range d.notifications {
+		notifier := d.notifier.Load()
+		if notifier == nil || !d.mgr.Settings().Desktop.Notifications {
+			continue
 		}
-	})
-	err := d.notifier.SendNotification(notifications.NotificationOptions{
-		ID: item.ID + "-" + string(item.Status), Title: title, Body: filepath.Base(item.Destination),
-	})
-	if err != nil {
-		d.log.Warn("send notification", "err", err)
+		var title string
+		switch item.Status {
+		case download.StatusCompleted:
+			title = "Download complete"
+		case download.StatusFailed:
+			title = "Download failed"
+		default:
+			continue
+		}
+		if !authorized {
+			// On macOS this waits for the user to answer the permission prompt.
+			if ok, err := notifier.RequestNotificationAuthorization(); !ok || err != nil {
+				d.log.Warn("notifications not authorized", "err", err)
+				continue
+			}
+			authorized = true
+		}
+		err := notifier.SendNotification(notifications.NotificationOptions{
+			ID: item.ID + "-" + string(item.Status), Title: title, Body: filepath.Base(item.Destination),
+		})
+		if err != nil {
+			d.log.Warn("send notification", "err", err)
+		}
 	}
 }
 
@@ -395,18 +429,23 @@ func (d *Desktop) watchClipboard(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		if !d.mgr.Settings().Desktop.ClipboardMonitor {
-			continue
-		}
-		text, ok := d.app.Clipboard.Text()
+		text, ok := d.app.Clipboard.Text() // Wails reads it on the main thread
 		if !ok || text == last {
 			continue
 		}
-		last = text
-		if offerable(text) {
+		last = text // also while disabled: turning the monitor on offers nothing old
+		if d.mgr.Settings().Desktop.ClipboardMonitor && offerable(text) {
 			d.app.Event.Emit(eventClipboard, strings.TrimSpace(text))
 		}
 	}
+}
+
+func host(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // offerable reports a single http(s) URL or a curl command.
@@ -425,21 +464,16 @@ func offerable(text string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-// openLog writes JSON logs to the data directory, keeping one previous file
-// once the current one passes 10 MB (DESIGN.md section 7).
+// openLog writes JSON logs to the data directory, rotating at 10 MB and
+// keeping three older files (DESIGN.md section 7).
 func openLog() (*slog.Logger, io.Closer) {
 	dir, err := service.DataDir()
 	if err != nil {
 		return logging.New(os.Stderr, slog.LevelInfo), io.NopCloser(nil)
 	}
-	path := filepath.Join(dir, "godl.log")
-	if fi, err := os.Stat(path); err == nil && fi.Size() > 10<<20 {
-		_ = os.Rename(path, path+".1")
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := logging.OpenRotating(filepath.Join(dir, "godl.log"), 10<<20, 3)
 	if err != nil {
 		return logging.New(os.Stderr, slog.LevelInfo), io.NopCloser(nil)
 	}
-	fmt.Fprintln(f) // separates runs
 	return logging.New(f, slog.LevelInfo), f
 }

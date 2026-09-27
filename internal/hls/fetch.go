@@ -11,50 +11,94 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// maxResource bounds a single playlist, key or segment held in memory.
-const maxResource = 512 << 20
+// maxInMemory bounds a playlist or key, the only resources held in memory;
+// segments stream to disk.
+const maxInMemory = 16 << 20
 
 var errStalled = errors.New("connection stalled")
 
-// get fetches uri, or its byte range [off, off+n) when n >= 0, retrying
-// transient failures. It returns the body and the URL after redirects. When
-// counted, received bytes feed the progress tracker.
-func (d *downloader) get(ctx context.Context, uri string, off, n int64, counted bool) ([]byte, *url.URL, error) {
+// sink receives one response body; reset rewinds it before a retry.
+type sink interface {
+	io.Writer
+	reset() error
+}
+
+type memSink struct{ bytes.Buffer }
+
+func (m *memSink) reset() error { m.Buffer.Reset(); return nil }
+
+type fileSink struct{ f *os.File }
+
+func (s fileSink) Write(p []byte) (int, error) { return s.f.Write(p) }
+
+func (s fileSink) reset() error {
+	if err := s.f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := s.f.Seek(0, io.SeekStart)
+	return err
+}
+
+// get fetches a small resource (a playlist or key) into memory. It returns
+// the body and the URL after redirects.
+func (d *downloader) get(ctx context.Context, uri string) ([]byte, *url.URL, error) {
+	var buf memSink
+	final, n, err := d.fetch(ctx, uri, 0, -1, false, maxInMemory, &buf)
+	if err != nil {
+		return nil, nil, err
+	}
+	return buf.Bytes()[:n], final, nil
+}
+
+// fetch streams uri, or its byte range [off, off+n) when n >= 0, into w,
+// retrying transient failures, and returns the final URL and the byte count.
+// limit bounds the body (-1 for none). When counted, received bytes feed the
+// progress tracker.
+func (d *downloader) fetch(ctx context.Context, uri string, off, n int64, counted bool, limit int64, w sink) (*url.URL, int64, error) {
 	var last *attemptError
 	for attempt := 0; attempt < d.opts.MaxAttempts; attempt++ {
 		if last != nil {
 			if err := sleepBeforeRetry(ctx, attempt-1, last.retryAfter, d.opts.BaseBackoff, d.opts.MaxBackoff); err != nil {
-				return nil, nil, err
+				return nil, 0, err
+			}
+			if err := w.reset(); err != nil {
+				return nil, 0, err
 			}
 		}
 		var got int64
-		body, final, aerr := d.getOnce(ctx, uri, off, n, func(k int) {
+		final, written, aerr := d.getOnce(ctx, uri, off, n, limit, w, func(k int) {
 			if counted {
 				got += int64(k)
 				d.prog.add(int64(k))
 			}
 		})
 		if aerr == nil {
-			return body, final, nil
+			return final, written, nil
 		}
 		d.prog.add(-got)
 		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		}
 		if last = aerr; !aerr.retryable {
 			break
 		}
 	}
-	return nil, nil, last
+	return nil, 0, last
 }
 
-func (d *downloader) getOnce(ctx context.Context, uri string, off, n int64, onRead func(int)) ([]byte, *url.URL, *attemptError) {
+// portableHeaders may go to a host other than the playlist's. Playlists name
+// segment and key URIs on any host, and credentials, cookies, and API keys
+// configured for the playlist's host must not follow them there.
+var portableHeaders = map[string]bool{"User-Agent": true, "Accept": true, "Accept-Language": true, "Referer": true}
+
+func (d *downloader) getOnce(ctx context.Context, uri string, off, n, limit int64, w sink, onRead func(int)) (*url.URL, int64, *attemptError) {
 	reqCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	stall := newStallTimer(d.opts.StallTimeout, func() { cancel(errStalled) })
@@ -68,10 +112,13 @@ func (d *downloader) getOnce(ctx context.Context, uri string, off, n int64, onRe
 
 	req, err := http.NewRequestWithContext(stall.trace(reqCtx), http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, nil, fatal(err)
+		return nil, 0, fatal(err)
 	}
+	sameHost := strings.EqualFold(req.URL.Hostname(), d.origin)
 	for k, v := range d.opts.Headers {
-		req.Header[k] = slices.Clone(v)
+		if sameHost || portableHeaders[http.CanonicalHeaderKey(k)] {
+			req.Header[k] = slices.Clone(v)
+		}
 	}
 	req.Header.Set("User-Agent", d.opts.UserAgent)
 	req.Header.Set("Accept-Encoding", "identity")
@@ -80,63 +127,80 @@ func (d *downloader) getOnce(ctx context.Context, uri string, off, n int64, onRe
 	}
 	resp, err := d.opts.Client.Do(req)
 	if err != nil {
-		return nil, nil, interrupted(err)
+		return nil, 0, interrupted(err)
 	}
 	defer resp.Body.Close()
 	if enc := strings.TrimSpace(resp.Header.Get("Content-Encoding")); enc != "" && !strings.EqualFold(enc, "identity") {
-		return nil, nil, fatal(fmt.Errorf("GET %s: unsupported Content-Encoding %q", uri, enc))
+		return nil, 0, fatal(fmt.Errorf("GET %s: unsupported Content-Encoding %q", uri, enc))
 	}
 	skip, want := int64(0), n
 	switch {
 	case resp.StatusCode == http.StatusPartialContent && n >= 0:
+		if start, ok := rangeStart(resp.Header.Get("Content-Range")); !ok || start != off {
+			return nil, 0, fatal(fmt.Errorf("GET %s: Content-Range %q does not start at %d", uri, resp.Header.Get("Content-Range"), off))
+		}
 	case resp.StatusCode == http.StatusOK && n >= 0:
 		skip = off // the server ignored Range; cut the sub-range out ourselves
 	case resp.StatusCode == http.StatusOK:
 		want = resp.ContentLength
 	default:
-		return nil, nil, statusError(uri, resp)
+		return nil, 0, statusError(uri, resp)
 	}
-	if want > maxResource {
-		return nil, nil, fatal(fmt.Errorf("GET %s: %d bytes exceeds the %d-byte limit", uri, want, maxResource))
+	if limit >= 0 && want > limit {
+		return nil, 0, fatal(fmt.Errorf("GET %s: %d bytes exceeds the %d-byte limit", uri, want, limit))
 	}
 
-	var buf bytes.Buffer
+	var written int64
 	chunk := make([]byte, d.readSize())
-	for want < 0 || int64(buf.Len()) < want {
+	for want < 0 || written < want {
 		k, readErr := resp.Body.Read(chunk)
 		if k > 0 {
 			stall.Stop() // waiting on a rate limiter is not a stall
 			for _, l := range d.opts.Limiters {
 				if err := l.WaitN(reqCtx, k); err != nil {
 					if reqCtx.Err() != nil {
-						return nil, nil, interrupted(err)
+						return nil, 0, interrupted(err)
 					}
-					return nil, nil, fatal(fmt.Errorf("rate limiter: %w", err))
+					return nil, 0, fatal(fmt.Errorf("rate limiter: %w", err))
 				}
 			}
 			stall.Reset(d.opts.StallTimeout)
 			keep := chunk[min(int64(k), skip):k]
 			skip -= int64(k - len(keep))
 			if want >= 0 {
-				keep = keep[:min(int64(len(keep)), want-int64(buf.Len()))]
+				keep = keep[:min(int64(len(keep)), want-written)]
 			}
-			buf.Write(keep)
+			if _, err := w.Write(keep); err != nil {
+				return nil, 0, fatal(fmt.Errorf("GET %s: write: %w", uri, err))
+			}
+			written += int64(len(keep))
 			onRead(len(keep))
-			if buf.Len() > maxResource {
-				return nil, nil, fatal(fmt.Errorf("GET %s: body exceeds the %d-byte limit", uri, maxResource))
+			if limit >= 0 && written > limit {
+				return nil, 0, fatal(fmt.Errorf("GET %s: body exceeds the %d-byte limit", uri, limit))
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
 			break
 		}
 		if readErr != nil {
-			return nil, nil, interrupted(readErr)
+			return nil, 0, interrupted(readErr)
 		}
 	}
-	if want >= 0 && int64(buf.Len()) != want {
-		return nil, nil, retryable(fmt.Errorf("GET %s: short response: got %d bytes, want %d", uri, buf.Len(), want))
+	if want >= 0 && written != want {
+		return nil, 0, retryable(fmt.Errorf("GET %s: short response: got %d bytes, want %d", uri, written, want))
 	}
-	return buf.Bytes(), resp.Request.URL, nil
+	return resp.Request.URL, written, nil
+}
+
+// rangeStart reads the first byte position of "bytes a-b/c".
+func rangeStart(header string) (int64, bool) {
+	spec, ok := strings.CutPrefix(strings.TrimSpace(header), "bytes ")
+	if !ok {
+		return 0, false
+	}
+	first, _, ok := strings.Cut(spec, "-")
+	start, err := strconv.ParseInt(first, 10, 64)
+	return start, ok && err == nil
 }
 
 // readSize keeps each read within every limiter's burst so WaitN never fails.

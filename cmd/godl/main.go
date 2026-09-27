@@ -19,11 +19,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zichuanxu/godl/internal/batch"
 	"github.com/zichuanxu/godl/internal/client"
 	"github.com/zichuanxu/godl/internal/download"
 	"github.com/zichuanxu/godl/internal/engine"
 	"github.com/zichuanxu/godl/internal/logging"
 	"github.com/zichuanxu/godl/internal/netproxy"
+	"github.com/zichuanxu/godl/internal/queuefile"
 	"github.com/zichuanxu/godl/internal/service"
 	"github.com/zichuanxu/godl/internal/settings"
 	"golang.org/x/time/rate"
@@ -84,6 +86,8 @@ func main() {
 		newSetCommand(cfg),
 		newDeleteCommand(cfg),
 		newSettingsCommand(cfg),
+		newExportCommand(cfg),
+		newImportCommand(cfg),
 		newDownloadCommand(),
 		newVersionCommand(),
 	)
@@ -166,6 +170,7 @@ func newAddCommand(cfg *cliConfig) *cobra.Command {
 	var dir, priority, speed, checksum string
 	var connections int
 	var headers headerFlags
+	var isBatch bool
 	cmd := &cobra.Command{
 		Use:   "add URL [OUTPUT]",
 		Short: "Queue a download in the service",
@@ -198,13 +203,28 @@ func newAddCommand(cfg *cliConfig) *cobra.Command {
 					return err
 				}
 			}
-			item, err := c.Add(cmd.Context(), req)
+			if !isBatch {
+				item, err := c.Add(cmd.Context(), req)
+				if err != nil {
+					return err
+				}
+				return writeJSON(cmd, item)
+			}
+			if req.Destination != "" {
+				return errors.New("--batch names files from the server; use --dir instead of OUTPUT")
+			}
+			urls, err := batch.Expand(req.URL)
 			if err != nil {
 				return err
 			}
-			return writeJSON(cmd, item)
+			return addAll(cmd, c, urls, func(u string) download.Request {
+				r := req
+				r.URL = u
+				return r
+			})
 		},
 	}
+	cmd.Flags().BoolVar(&isBatch, "batch", false, "treat URL as a pattern: [1-10], [01-10], [a-z], [0-100:5], {a,b}")
 	cmd.Flags().StringVar(&dir, "dir", "", "directory for a server-named file")
 	cmd.Flags().StringVar(&priority, "priority", "normal", "low, normal, or high")
 	cmd.Flags().IntVar(&connections, "connections", 0, "connections, 1-32 (default: site or global setting)")
@@ -212,6 +232,84 @@ func newAddCommand(cfg *cliConfig) *cobra.Command {
 	cmd.Flags().StringVar(&checksum, "checksum", "", "expected digest as algo:hex (sha256, sha512, sha1, md5)")
 	cmd.Flags().Var(&headers, "header", "request header, such as a cookie; repeatable")
 	return cmd
+}
+
+// addAll queues every request, reports each result, and fails if any failed.
+func addAll[T any](cmd *cobra.Command, c *client.Client, inputs []T, request func(T) download.Request) error {
+	failed := 0
+	for _, in := range inputs {
+		req := request(in)
+		item, err := c.Add(cmd.Context(), req)
+		if err != nil {
+			failed++
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", req.URL, err)
+			continue
+		}
+		if err := writeJSON(cmd, item); err != nil {
+			return err
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d downloads were not added", failed, len(inputs))
+	}
+	return nil
+}
+
+func newExportCommand(cfg *cliConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "export [FILE]",
+		Short: "Write the unfinished downloads to a JSON file (standard output by default)",
+		Long:  "Write the unfinished downloads to a JSON file. Request headers such as cookies are never exported.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := cfg.client()
+			if err != nil {
+				return err
+			}
+			items, err := c.List(cmd.Context())
+			if err != nil {
+				return err
+			}
+			data, err := queuefile.Export(items, false)
+			if err != nil {
+				return err
+			}
+			data = append(data, '\n')
+			if len(args) == 0 || args[0] == "-" {
+				_, err = cmd.OutOrStdout().Write(data)
+				return err
+			}
+			return os.WriteFile(args[0], data, 0o600)
+		},
+	}
+}
+
+func newImportCommand(cfg *cliConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "import FILE",
+		Short: "Queue the downloads in an exported file or a list of URLs ('-' for standard input)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := cfg.client()
+			if err != nil {
+				return err
+			}
+			var data []byte
+			if args[0] == "-" {
+				data, err = io.ReadAll(cmd.InOrStdin())
+			} else {
+				data, err = os.ReadFile(args[0])
+			}
+			if err != nil {
+				return err
+			}
+			reqs, err := queuefile.Import(data)
+			if err != nil {
+				return err
+			}
+			return addAll(cmd, c, reqs, func(r download.Request) download.Request { return r })
+		},
+	}
 }
 
 func newSetCommand(cfg *cliConfig) *cobra.Command {

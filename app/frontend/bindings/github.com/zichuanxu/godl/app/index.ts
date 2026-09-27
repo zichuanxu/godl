@@ -7,5 +7,6 @@ export {
 };
 
 export {
+    ImportResult,
     State
 } from "./models.js";
