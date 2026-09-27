@@ -13,7 +13,7 @@ work="$(mktemp -d)"
 mount="$work/mnt"
 cleanup() {
   pkill -f "$appdir/godl.app/Contents/MacOS/godl" 2>/dev/null || true
-  [ -n "${server:-}" ] && kill "$server" 2>/dev/null || true
+  if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
   hdiutil detach -quiet "$mount" 2>/dev/null || true
   rm -rf "$work"
 }

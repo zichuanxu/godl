@@ -13,8 +13,8 @@ work="$(mktemp -d)"
 installdir="$LOCALAPPDATA/Programs/godl"
 cleanup() {
   taskkill //IM godl.exe //F >/dev/null 2>&1 || true
-  [ -n "${server:-}" ] && kill "$server" 2>/dev/null || true
-  rm -rf "$work"
+  if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
+  rm -rf "$work" || true
 }
 trap cleanup EXIT
 
@@ -27,7 +27,8 @@ powershell -NoProfile -Command "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Wi
 echo "== serve a test file"
 mkdir -p "$work/www"
 head -c 5000000 /dev/urandom > "$work/www/payload.bin"
-want="$(sha256sum "$work/www/payload.bin" | cut -d' ' -f1)"
+# Hash from stdin: sha256sum escapes names containing backslashes.
+want="$(sha256sum < "$work/www/payload.bin" | cut -d' ' -f1)"
 (cd "$work/www" && exec python -m http.server 18790 --bind 127.0.0.1 >/dev/null 2>&1) &
 server=$!
 
@@ -44,7 +45,7 @@ echo "== download"
 dest="$(cygpath -w "$USERPROFILE/Downloads/godl-smoke-$$.bin")"
 "$cli" --token-file "$token" add "http://127.0.0.1:18790/payload.bin" "$dest" >/dev/null
 for _ in $(seq 1 60); do [ -f "$dest" ] && break; sleep 1; done
-got="$(sha256sum "$dest" | cut -d' ' -f1)"
+got="$(sha256sum < "$dest" | cut -d' ' -f1)"
 [ "$got" = "$want" ] || { echo "checksum mismatch"; exit 1; }
 # The Zone.Identifier stream is written right after the file appears.
 motw() { powershell -NoProfile -Command "Get-Content -Path '$dest' -Stream Zone.Identifier" 2>/dev/null | grep -q ZoneId=3; }
