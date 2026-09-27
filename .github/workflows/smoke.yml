@@ -48,3 +48,19 @@ jobs:
           tar -xzf "assets/godl_${v}_darwin_arm64.tar.gz" -C assets godl
 
       - run: app/scripts/smoke-macos.sh assets/godl-desktop_*_macos_universal.dmg assets/godl
+
+  # Installs both Scoop packages from zichuanxu/scoop-bucket, as a user would.
+  scoop:
+    runs-on: windows-latest
+    steps:
+      - name: install from the bucket
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+          Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install.ps1
+          .\install.ps1 -RunAsAdmin
+          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
+          scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket
+          scoop install zichuanxu/godl zichuanxu/godl-desktop
+          godl version
+          if (-not (Test-Path "$env:USERPROFILE\scoop\apps\godl-desktop\current\godl.exe")) { throw "godl-desktop missing" }
