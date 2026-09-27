@@ -153,12 +153,18 @@ func TestProtocolViolationsFail(t *testing.T) {
 	}
 }
 
+// A representation that changes mid-download ends as the new file, never a
+// mix. Request 2 swaps the representation and fails, so its retry is certain
+// to see v2 and hit the If-Range mismatch; ranges already streaming v1 are
+// discarded by the restart.
 func TestValidatorChangeMidDownloadRestartsCleanly(t *testing.T) {
 	first, second := randomData(t, 3<<20), randomData(t, 3<<20+17)
 	srv := &fileServer{data: first, etag: `"v1"`}
 	srv.fault = func(w http.ResponseWriter, r *http.Request, start, end, n int64) bool {
-		if n == 3 {
-			srv.replace(second, `"v2"`) // served from now on; If-Range no longer matches
+		if n == 2 {
+			srv.replace(second, `"v2"`)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return true
 		}
 		return false
 	}
