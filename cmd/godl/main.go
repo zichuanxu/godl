@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zichuanxu/godl/downloader"
 	"github.com/zichuanxu/godl/internal/client"
 	"github.com/zichuanxu/godl/internal/engine"
 	"github.com/zichuanxu/godl/internal/logging"
@@ -102,7 +101,7 @@ func newServiceCommand(cfg *cliConfig) *cobra.Command {
 					return err
 				}
 			}
-			runner, err := engine.NewRunner(downloader.Config{})
+			runner, err := engine.NewRunner(engine.Config{})
 			if err != nil {
 				return err
 			}
@@ -226,10 +225,10 @@ func newDeleteCommand(cfg *cliConfig) *cobra.Command {
 }
 
 func newDownloadCommand() *cobra.Command {
-	var workers, attempts int
-	var chunkMiB, parallelMiB int64
-	var partTimeout time.Duration
-	var sha256sum, resumeKey string
+	var connections, attempts int
+	var minSplitMiB int64
+	var stallTimeout time.Duration
+	var checksum, resumeKey string
 	var overwrite bool
 	var headers headerFlags
 	cmd := &cobra.Command{
@@ -237,9 +236,6 @@ func newDownloadCommand() *cobra.Command {
 		Short: "Download a file directly without the service",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if chunkMiB <= 0 || parallelMiB < 0 {
-				return errors.New("chunk-mib must be positive and parallel-min-mib cannot be negative")
-			}
 			h := make(http.Header)
 			for _, raw := range headers {
 				name, value, _ := strings.Cut(raw, ":")
@@ -249,13 +245,19 @@ func newDownloadCommand() *cobra.Command {
 				}
 				h.Add(name, value)
 			}
-			dl, err := downloader.New(downloader.Config{Workers: workers, ChunkSize: chunkMiB << 20, MinParallelSize: parallelMiB << 20, MaxAttempts: attempts, PartTimeout: partTimeout, Headers: h, ExpectedSHA256: sha256sum, ResumeKey: resumeKey, Overwrite: overwrite})
+			e, err := engine.New(engine.Config{
+				Connections: connections, MinSplitSize: minSplitMiB << 20, MaxAttempts: attempts,
+				StallTimeout: stallTimeout, Headers: h, Checksum: checksum, ResumeKey: resumeKey, Overwrite: overwrite,
+			})
 			if err != nil {
 				return err
 			}
 			var lastLineLen int
-			err = dl.Download(cmd.Context(), args[0], args[1], func(p downloader.Progress) {
-				line := fmt.Sprintf("%6.2f%%  %s / %s", p.Percent, formatBytes(p.Completed), formatBytes(p.Total))
+			err = e.Download(cmd.Context(), args[0], args[1], func(p engine.Progress) {
+				line := formatBytes(p.Completed) + " / " + formatBytes(p.Total)
+				if p.Total > 0 {
+					line = fmt.Sprintf("%6.2f%%  %s", float64(p.Completed)*100/float64(p.Total), line)
+				}
 				padding := ""
 				if lastLineLen > len(line) {
 					padding = strings.Repeat(" ", lastLineLen-len(line))
@@ -269,12 +271,11 @@ func newDownloadCommand() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().IntVar(&workers, "workers", 8, "maximum concurrent range workers")
-	cmd.Flags().Int64Var(&chunkMiB, "chunk-mib", 8, "range chunk size in MiB")
-	cmd.Flags().Int64Var(&parallelMiB, "parallel-min-mib", 32, "minimum file size for parallel mode")
-	cmd.Flags().IntVar(&attempts, "attempts", 5, "maximum attempts per request")
-	cmd.Flags().DurationVar(&partTimeout, "part-timeout", 2*time.Minute, "maximum duration of one range request")
-	cmd.Flags().StringVar(&sha256sum, "sha256", "", "optional expected SHA-256 hex digest")
+	cmd.Flags().IntVar(&connections, "connections", 8, "parallel connections, at most 32")
+	cmd.Flags().Int64Var(&minSplitMiB, "min-split-mib", 1, "smallest range in MiB handed to one connection")
+	cmd.Flags().IntVar(&attempts, "attempts", 5, "consecutive failed requests without progress before giving up")
+	cmd.Flags().DurationVar(&stallTimeout, "stall-timeout", 30*time.Second, "fail a connection that receives no bytes for this long")
+	cmd.Flags().StringVar(&checksum, "checksum", "", "expected digest as algo:hex (sha256, sha512, sha1, md5)")
 	cmd.Flags().StringVar(&resumeKey, "resume-key", "", "stable resume identity for expiring signed URLs")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing destination")
 	cmd.Flags().Var(&headers, "header", "request header; repeatable, for example --header 'Authorization: Bearer ...'")

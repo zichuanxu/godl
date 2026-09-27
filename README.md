@@ -5,9 +5,9 @@
 - a direct command-line downloader for one-off transfers;
 - a loopback service with a SQLite-backed queue, an authenticated JSON API, SSE progress events, and CLI client commands.
 
-The downloader supports capability probing, validated byte ranges, bounded concurrency, retries, checkpoints, resume, SHA-256 verification, destination locking, and safe finalization.
+The engine splits a download across up to 32 HTTP/1.1 connections and rebalances them continuously: when a connection finishes, it takes over half of the largest remaining range, and connections far slower than the rest are replaced. Progress is checkpointed at byte granularity, so an interrupted download resumes where it stopped, even after a crash. Responses are validated against the probed ETag or Last-Modified, `Content-Range`, and size, and an optional checksum is verified before the file is committed atomically.
 
-The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M0.5 (hardening)**; the engine rewrite (M1), scheduler features (M2), and desktop GUI (M3) are not shipped yet.
+The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M1 (engine)**; scheduler features (M2) and the desktop GUI (M3) are not shipped yet.
 
 ## Requirements
 
@@ -23,42 +23,53 @@ go build -o godl ./cmd/godl
 ./godl version
 ```
 
-`go test -short ./...` skips the end-to-end crash-resume test, which takes several seconds.
+`go test -short ./...` skips the slower end-to-end tests.
+
+The performance gate compares godl with `aria2c -x16 -s16` on a local server that caps each connection's bandwidth (CI runs it on every push):
+
+```bash
+go build -o godl ./cmd/godl
+go run ./tools/bench -godl ./godl -gate
+```
 
 ## Direct downloader
 
-The `download` command runs the downloader without the service:
+The `download` command runs the engine without the service:
 
 ```bash
 ./godl download \
-  --workers 8 \
-  --chunk-mib 8 \
-  --parallel-min-mib 32 \
-  --attempts 5 \
-  --part-timeout 2m \
-  --sha256 '<64-character-hex-digest>' \
+  --connections 8 \
+  --checksum 'sha256:<64-character-hex-digest>' \
   'https://example.com/large-file.bin' \
   './large-file.bin'
 ```
 
-Repeat `--header` for request headers:
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--connections` | `8` | Parallel connections, at most 32. |
+| `--min-split-mib` | `1` | Smallest range handed to one connection. |
+| `--stall-timeout` | `30s` | Reconnect a connection that receives nothing for this long. |
+| `--attempts` | `5` | Consecutive failed requests without progress before giving up. |
+| `--checksum` | none | `algo:hex` with `sha256`, `sha512`, `sha1`, or `md5`. |
+| `--resume-key` | the URL | Stable identity for expiring signed URLs. |
+| `--header` | none | Extra request header; repeatable. |
+| `--overwrite` | off | Replace an existing destination. |
 
 ```bash
-./godl download \
-  --header 'Authorization: Bearer TOKEN' \
-  --header 'X-Tenant-ID: tenant-a' \
-  URL OUTPUT
-```
-
-For expiring signed URLs, use a stable resume identity:
-
-```bash
+./godl download --header 'Authorization: Bearer TOKEN' URL OUTPUT
 ./godl download --resume-key 'bucket/object/version-42' SIGNED_URL OUTPUT
 ```
 
-While a transfer is active the downloader keeps `OUTPUT.part`, `OUTPUT.part.meta`, and `OUTPUT.lock`. The lock is an OS advisory lock, so a crashed or killed process never leaves a lock that blocks the next run. Parallel transfers keep resumable state after failures and cancellation; single-stream transfers (no range support, no strong ETag, unknown size, or below `--parallel-min-mib`) restart from the beginning. A verified transfer is atomically renamed to the destination. `SIGINT` and `SIGTERM` cancel active requests.
+While a transfer is active the engine keeps `OUTPUT.part`, `OUTPUT.part.meta`, and `OUTPUT.lock`. The lock is an OS advisory lock, so a crashed or killed process never leaves a lock that blocks the next run. The engine checks free space and preallocates the file before downloading.
 
-Known limit until M1: `--part-timeout` bounds a whole range request, so on a very slow server one 8 MiB chunk, or a whole single-stream transfer, can exceed it.
+When parallel download and resume apply:
+
+| Server offers | Parallel | Resume after a restart |
+| --- | --- | --- |
+| Ranges, known size, strong ETag | yes | yes |
+| Ranges, known size, `Last-Modified` only | yes | yes |
+| Ranges, known size, no validator | yes | no, restarts from zero |
+| No ranges, or unknown size | single connection | no, restarts from zero |
 
 ## Background service and CLI client
 
@@ -134,9 +145,8 @@ The React queue table in `app/frontend` predates these rules and cannot talk to 
 
 ```text
 cmd/godl/             Cobra CLI: service, add, list, pause, resume, retry, delete, download, version
-downloader/           Current resumable concurrent HTTP downloader (replaced in M1)
 internal/download/    Shared queue model, errors, and event contract
-internal/engine/      Runner adapter plus unwired M1 building blocks
+internal/engine/      Download engine: work-stealing ranges, checkpoints, validation
 internal/filelock/    OS advisory file locks
 internal/logging/     slog setup and URL redaction
 internal/store/       SQLite persistence
@@ -144,6 +154,7 @@ internal/manager/     Queue lifecycle, recovery, destination confinement, unwire
 internal/api/         Authenticated loopback JSON and SSE API
 internal/client/      Service client
 internal/service/     Service composition, lifecycle, paths, and token
+tools/bench/          Performance gate against aria2c
 app/                  Desktop shell placeholder and React frontend
 DESIGN.md             Design contract and M0–M6 roadmap
 ```

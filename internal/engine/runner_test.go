@@ -11,12 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/zichuanxu/godl/downloader"
 )
 
 func TestRunnerDownloadsWithDynamicRanges(t *testing.T) {
-	data := make([]byte, 256<<10)
+	data := make([]byte, 2<<20)
 	for i := range data {
 		data[i] = byte(i % 251)
 	}
@@ -48,7 +46,7 @@ func TestRunnerDownloadsWithDynamicRanges(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runner, err := NewRunner(downloader.Config{Workers: 4, ChunkSize: 64 << 10, MinParallelSize: 1, MaxAttempts: 1})
+	runner, err := NewRunner(Config{Connections: 4, MinSplitSize: 256 << 10, MaxAttempts: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

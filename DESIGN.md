@@ -55,7 +55,8 @@ no Windows service).
 ## 2. Layout
 
 ```text
-internal/engine/   source.go probe.go segment.go validator.go commit.go prealloc_*.go
+internal/engine/   engine.go scheduler.go ranged.go single.go checkpoint.go checksum.go
+                   retry.go transport.go prealloc_*.go diskfree_*.go runner.go
 internal/hls/      playlist.go decrypt.go concat.go
 internal/manager/  queue.go scheduler.go limiter.go filename.go
 internal/store/    sqlite.go crypto.go migrations/
@@ -134,9 +135,12 @@ validator table allows it.
 The stall clock only runs while waiting on the network, so time blocked on a rate
 limiter (section 3.9) never counts.
 
-**Slow-connection replacement.** When a connection's throughput stays below a fraction of
-the download's per-connection average and its remaining interval is large enough to
-split, the scheduler splits it and gives the upper half to a new connection.
+**Slow-connection replacement.** When a connection's throughput stays below 30% of the
+download's per-connection average for at least 3 s and its remaining interval is large
+enough to split, its request is aborted and the range reconnects on a fresh connection;
+any idle connection also steals the upper half. A connection that exhausts its retries
+while others are alive (for example against a per-client connection cap) retires and
+leaves its range to them; only the last connection standing fails the download.
 
 ### 3.5 Disk
 
@@ -404,9 +408,9 @@ Plus a **randomized crash-resume test** that aborts at arbitrary offsets, resume
 asserts the final SHA-256 always matches a golden digest (×100). This is the only way
 to trust an interval-based checkpoint.
 
-**Performance gate** — a reproducible benchmark in the repository (a local throttled
-`httptest` server plus one or two public large-file CDNs), compared with
-`aria2c -x16 -s16`:
+**Performance gate** — `tools/bench`, a reproducible benchmark run in CI (a local
+server capping each connection's bandwidth, plus an uncapped run for CPU cost),
+compared with `aria2c -x16 -s16`:
 
 - throughput ≥ 95% of aria2c on the same URL and network
 - less than one CPU core at 1 Gbps

@@ -1,4 +1,3 @@
-// Package engine adapts the existing trusted downloader to the service model.
 package engine
 
 import (
@@ -8,30 +7,30 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/zichuanxu/godl/downloader"
 	"github.com/zichuanxu/godl/internal/download"
 )
 
+// Runner adapts the engine to the service's download.Runner contract.
 type Runner struct {
-	downloader *downloader.Downloader
+	engine *Engine
 }
 
-func NewRunner(cfg downloader.Config) (*Runner, error) {
-	dl, err := downloader.New(cfg)
+func NewRunner(cfg Config) (*Runner, error) {
+	e, err := New(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{downloader: dl}, nil
+	return &Runner{engine: e}, nil
 }
 
 func (r *Runner) Download(ctx context.Context, rawURL, destination string, progress func(download.Progress)) error {
-	err := r.downloader.Download(ctx, rawURL, destination, func(current downloader.Progress) {
+	err := r.engine.Download(ctx, rawURL, destination, func(current Progress) {
 		if progress == nil {
 			return
 		}
 		progress(download.Progress{Completed: current.Completed, Total: current.Total})
 	})
-	if errors.Is(err, downloader.ErrLocked) {
+	if errors.Is(err, ErrLocked) {
 		// Windows may release a killed process's lock a moment after it exits.
 		return fmt.Errorf("%w: %w", download.ErrDestinationBusy, err)
 	}

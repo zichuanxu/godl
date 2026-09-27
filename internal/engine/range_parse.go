@@ -34,3 +34,17 @@ func parseContentRange(value string) (start, end, total int64, ok bool) {
 	}
 	return start, end, total, true
 }
+
+// parseUnsatisfiedContentRange reads the total from "bytes */total".
+func parseUnsatisfiedContentRange(value string) (int64, bool) {
+	fields := strings.Fields(strings.TrimSpace(value))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "bytes") {
+		return 0, false
+	}
+	total, ok := strings.CutPrefix(fields[1], "*/")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(total, 10, 64)
+	return n, err == nil && n >= 0
+}

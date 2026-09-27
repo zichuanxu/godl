@@ -133,8 +133,8 @@ func TestServiceResumesAfterKill(t *testing.T) {
 	if testing.Short() {
 		t.Skip("end-to-end crash test takes several seconds")
 	}
-	// 16 chunks of 8 MiB for 8 workers: two waves of about 4 s each, so the
-	// first wave is finished and checkpointed while the second is in flight.
+	// Eight connections at about 2 MiB/s each need about 8 s for 128 MiB, so
+	// half the file is written and checkpointed well before the kill.
 	data := make([]byte, 128<<20)
 	for i := range data {
 		data[i] = byte(i % 251)
@@ -150,24 +150,23 @@ func TestServiceResumesAfterKill(t *testing.T) {
 	if _, err := first.client.Add(context.Background(), server.URL+"/big.bin", dest); err != nil {
 		t.Fatal(err)
 	}
-	// Progress events are coalesced per chunk completion, so the server's
-	// byte count is the reliable signal that the first wave has finished.
+	// The server's byte count is a precise, poll-free signal of progress.
 	deadline := time.Now().Add(30 * time.Second)
 	for sent.Load() < 64<<20 {
 		if time.Now().After(deadline) {
-			t.Fatalf("first wave did not finish: %+v", first.item(t))
+			t.Fatalf("half the file was not sent: %+v", first.item(t))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	firstWave := time.Now()
-	// Checkpoints are written every 2 s; wait for one after the first wave.
+	halfway := time.Now()
+	// Checkpoints are written every 2 s; wait for one after the halfway mark.
 	for {
 		info, err := os.Stat(dest + ".part.meta")
-		if err == nil && info.ModTime().After(firstWave) {
+		if err == nil && info.ModTime().After(halfway) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no checkpoint after the first wave: %v", err)
+			t.Fatalf("no checkpoint after the halfway mark: %v", err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
