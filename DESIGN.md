@@ -1,6 +1,6 @@
-# godl — Design Contract
+# nimget — Design Contract
 
-**`github.com/zichuanxu/godl`** · Apache-2.0 · Go 1.25 · open source, free
+**`github.com/zichuanxu/nimget`** · Apache-2.0 · Go 1.25 · open source, free
 
 A fast, cross-platform download manager. The core engine, service, CLI, and desktop GUI
 target feature parity with Internet Download Manager. The browser extension is deferred.
@@ -17,7 +17,7 @@ messages, error strings, log messages, CLI help, GUI copy, extension strings, is
 templates, and all documentation are written in English. No exceptions, including
 scratch and internal notes.
 
-**Zero spend.** godl is a personal open-source project. No paid certificates, developer
+**Zero spend.** nimget is a personal open-source project. No paid certificates, developer
 accounts, update servers, or hosted services. Free CI for public repositories is fine.
 
 ---
@@ -29,14 +29,14 @@ library that runs in one of two hosts:
 
 - **GUI host** — the Wails app embeds the service in-process, owns the tray icon, and
   still listens on the loopback API so the CLI (and later the extension) can reach it.
-- **Headless host** — `godl service` runs the same service without a GUI, for Linux,
+- **Headless host** — `nimget service` runs the same service without a GUI, for Linux,
   servers, and CI.
 
 Clients:
 
 - Wails/React GUI — calls the service through Wails bindings and receives events on the
   Wails event bus, fed by the same manager event stream. It does not use loopback HTTP.
-- `godl` CLI — loopback HTTP + SSE.
+- `nimget` CLI — loopback HTTP + SSE.
 - MV3 browser extension — **deferred** (section 6).
 
 Autostart-at-login is a settings toggle, not an OS-registered service (no launchd job,
@@ -65,11 +65,11 @@ internal/netproxy/ manual and system proxy
 internal/store/    sqlite.go crypto.go migrations/
 internal/api/      http.go sse.go auth.go
 internal/service/  composition and lifecycle, shared by both hosts
-cmd/godl/          headless service + CLI (cobra) — must NOT import wails
+cmd/nimget/          headless service + CLI (cobra) — must NOT import wails
 app/               wails v3 main + frontend/ (react-ts)
 ```
 
-The public `downloader/` package is removed after the M1 cutover. godl makes no
+The public `downloader/` package is removed after the M1 cutover. nimget makes no
 library-API stability promise; everything lives under `internal/`.
 
 ---
@@ -453,7 +453,7 @@ compared with `aria2c -x16 -s16`:
 Wails v3 is chosen over v2 because v2 has no system tray API. v3 is still beta as of
 2026-09; the version is pinned and upgraded deliberately.
 
-**CI gate:** `go list -deps ./cmd/godl` must not contain `wails`. The headless binary
+**CI gate:** `go list -deps ./cmd/nimget` must not contain `wails`. The headless binary
 stays lean and cross-compiles trivially.
 
 ---
@@ -465,7 +465,7 @@ mechanism.
 
 ```text
 LICENSE         Apache-2.0
-NOTICE          godl attribution
+NOTICE          nimget attribution
 ```
 
 **Unsigned builds.** No Apple Developer account and no Windows code-signing certificate.
@@ -476,8 +476,8 @@ NOTICE          godl attribution
 | `zichuanxu/homebrew-tap` | cask (GUI) and formula (CLI) | Homebrew's official cask repository removes casks that fail Gatekeeper checks from 2026-09-01, so the GUI cannot go there unsigned |
 | `zichuanxu/scoop-bucket` | Windows GUI and CLI | |
 
-Package names: Homebrew formula `godl` (CLI) and cask `godl-desktop` in
-`zichuanxu/homebrew-tap`; Scoop `godl` and `godl-desktop` in `zichuanxu/scoop-bucket`.
+Package names: Homebrew formula `nimget` (CLI) and cask `nimget-desktop` in
+`zichuanxu/homebrew-tap`; Scoop `nimget` and `nimget-desktop` in `zichuanxu/scoop-bucket`.
 winget is not offered. `tools/packaging` renders all of
 them from the release checksums; the release workflow pushes the tap and bucket when a
 `TAP_TOKEN` secret exists and attaches the manifests to the release either way. Releases start as drafts and are published only after
@@ -494,7 +494,7 @@ banner linking to release notes. No update server, no signing keys, no
 self-replacement code — an updater that bricks an install is the scariest class of
 desktop bug.
 
-`godl version` prints the version, commit, and build date injected at link time.
+`nimget version` prints the version, commit, and build date injected at link time.
 
 ---
 
@@ -503,7 +503,7 @@ desktop bug.
 | | Tag | Deliverable | Done when |
 |---|---|---|---|
 | **M0** | — ✅ | Current engine wired through service + SQLite + API + minimal React table. | Done. |
-| **M0.5** | v0.1 ✅ | Hardening: git, green `go vet`/`go test`, local authorization (5.1), advisory locks, lifecycle and restart recovery (4.1), async progress persistence, `slog` with redaction, LICENSE/NOTICE, `godl version`, README fixes, CI matrix, goreleaser CLI release. | CI green with `-race` on three OSes; API contract tests cover authorization denial; `kill -9` mid-download, restart, and the download resumes. |
+| **M0.5** | v0.1 ✅ | Hardening: git, green `go vet`/`go test`, local authorization (5.1), advisory locks, lifecycle and restart recovery (4.1), async progress persistence, `slog` with redaction, LICENSE/NOTICE, `nimget version`, README fixes, CI matrix, goreleaser CLI release. | CI green with `-race` on three OSes; API contract tests cover authorization denial; `kill -9` mid-download, restart, and the download resumes. |
 | **M1** | v0.2 ✅ | Engine rewrite: work-stealing intervals, stall timeout and slow-connection replacement, validator table, HTTP/1.1 forcing with h2 fallback, free-space precheck, preallocation, checksums; `downloader/` removed. | Fault-injection suite and crash-resume ×100 green on three OSes; performance gate met. |
 | **M2** | v0.3 ✅ | Manager and network: priorities, connection defaults and host cap, hierarchical limiters, time-based scheduler, filename resolution and placement, manual and system proxy, per-site settings. | Deterministic fake-clock scheduler tests; system-proxy integration tests on macOS and Windows. |
 | **M3** | v0.6 ✅¹ | GUI: Wails v3, in-process service, bindings and event bus, tray/menubar, notifications, sparkline, settings, drag-drop, open/reveal folder, cURL import, clipboard monitor, keyring-encrypted secrets. | Manual checklist passes on macOS and Windows. |
@@ -532,7 +532,7 @@ global hotkey, download-all-links, code signing, Linux GUI.
    decide then.
 
 Closed by revision 2: repository ownership (moved from `amemiya02` to `zichuanxu`;
-module path `github.com/zichuanxu/godl`), notarization and signing certificates (not pursued), minimal
+module path `github.com/zichuanxu/nimget`), notarization and signing certificates (not pursued), minimal
 ffmpeg build script (ffmpeg is not bundled), "v1 spans all four feature bundles" (the
 extension and video extras are deferred).
 

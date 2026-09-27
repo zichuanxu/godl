@@ -1,4 +1,4 @@
-# Using godl
+# Using nimget
 
 The CLI, the background service, its settings and HTTP API, and the security model.
 
@@ -7,7 +7,7 @@ The CLI, the background service, its settings and HTTP API, and the security mod
 The `download` command runs the engine without the service:
 
 ```bash
-./godl download \
+./nimget download \
   --connections 8 \
   --checksum 'sha256:<64-character-hex-digest>' \
   'https://example.com/large-file.bin' \
@@ -28,8 +28,8 @@ The `download` command runs the engine without the service:
 | `--overwrite` | off | Replace an existing destination. |
 
 ```bash
-./godl download --header 'Authorization: Bearer TOKEN' URL OUTPUT
-./godl download --resume-key 'bucket/object/version-42' SIGNED_URL OUTPUT
+./nimget download --header 'Authorization: Bearer TOKEN' URL OUTPUT
+./nimget download --resume-key 'bucket/object/version-42' SIGNED_URL OUTPUT
 ```
 
 An HLS playlist, recognised by a `.m3u8` URL or an HLS `Content-Type`, is downloaded segment by segment into one MPEG-TS file (fMP4 streams get their init segment first). A master playlist picks its highest-bandwidth variant; live streams and SAMPLE-AES are refused. Separate audio and subtitle renditions are not downloaded, and an fMP4 stream keeps the `.ts` name chosen before its playlist is read (convert it to MP4 for players that trust extensions). Cookies and other request headers are sent only to the playlist's host.
@@ -50,7 +50,7 @@ When parallel download and resume apply:
 ## Background service and CLI client
 
 ```bash
-./godl service \
+./nimget service \
   --listen 127.0.0.1:51000 \
   --download-root "$HOME/Downloads"
 ```
@@ -58,30 +58,30 @@ When parallel download and resume apply:
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--listen` | `127.0.0.1:51000` | Loopback address; non-loopback addresses are rejected. |
-| `--database` | `<config dir>/godl/godl.db` | SQLite queue. |
+| `--database` | `<config dir>/nimget/nimget.db` | SQLite queue. |
 | `--download-root` | `~/Downloads` | Directory downloads may be written under. Repeatable. |
 | `--log-level` | `info` | JSON logs on stderr: `debug`, `info`, `warn`, `error`. |
-| `--token-file` | `<config dir>/godl/token` | API token, created on first start with owner-only permissions. |
+| `--token-file` | `<config dir>/nimget/token` | API token, created on first start with owner-only permissions. |
 
 `<config dir>` is `~/Library/Application Support` on macOS, `%AppData%` on Windows, and `$XDG_CONFIG_HOME` or `~/.config` on Linux.
 
 Client commands read the same token file and talk to `http://127.0.0.1:51000` unless `--address` or `--token-file` say otherwise:
 
 ```bash
-./godl add 'https://example.com/file.bin'                 # named by the server
-./godl add 'https://example.com/file.bin' ~/Downloads/f.bin --priority high --speed-limit 2M
-./godl add URL --dir ~/Downloads/isos --connections 16 --header 'Cookie: session=...'
-./godl list
-./godl set <id> --priority low --speed-limit 0
-./godl pause <id>
-./godl resume <id>
-./godl retry <id>
-./godl delete <id> --files
-./godl settings get > settings.json
-./godl settings set settings.json
-./godl add --batch 'https://example.com/photos/img[001-120].jpg' --dir ~/Downloads/photos
-./godl export queue.json                                   # unfinished downloads, never their headers
-./godl import queue.json                                   # or a text file with one URL per line
+./nimget add 'https://example.com/file.bin'                 # named by the server
+./nimget add 'https://example.com/file.bin' ~/Downloads/f.bin --priority high --speed-limit 2M
+./nimget add URL --dir ~/Downloads/isos --connections 16 --header 'Cookie: session=...'
+./nimget list
+./nimget set <id> --priority low --speed-limit 0
+./nimget pause <id>
+./nimget resume <id>
+./nimget retry <id>
+./nimget delete <id> --files
+./nimget settings get > settings.json
+./nimget settings set settings.json
+./nimget add --batch 'https://example.com/photos/img[001-120].jpg' --dir ~/Downloads/photos
+./nimget export queue.json                                   # unfinished downloads, never their headers
+./nimget import queue.json                                   # or a text file with one URL per line
 ```
 
 Batch patterns expand left to right: `[1-10]`, zero-padded `[001-120]`, stepped `[0-100:5]`, letters `[a-z]`, and alternatives `{cd,dvd}`, up to 10,000 URLs.
@@ -92,7 +92,7 @@ Relative paths are resolved against the client's working directory. On restart, 
 
 ### Settings
 
-`godl settings set` replaces the whole document, so edit the output of `settings get`:
+`nimget settings set` replaces the whole document, so edit the output of `settings get`:
 
 ```json
 {

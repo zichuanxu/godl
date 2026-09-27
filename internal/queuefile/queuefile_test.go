@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/nimget/internal/download"
 )
 
 func TestExportImportRoundTrip(t *testing.T) {

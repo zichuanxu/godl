@@ -1,4 +1,4 @@
-// Package update checks GitHub Releases for a newer godl (DESIGN.md
+// Package update checks GitHub Releases for a newer nimget (DESIGN.md
 // section 10). It only reports; it never downloads or replaces anything.
 package update
 
@@ -16,7 +16,7 @@ import (
 )
 
 // LatestURL is the GitHub API endpoint for the newest non-prerelease.
-const LatestURL = "https://api.github.com/repos/zichuanxu/godl/releases/latest"
+const LatestURL = "https://api.github.com/repos/zichuanxu/nimget/releases/latest"
 
 // Interval is how often the desktop app checks.
 const Interval = 7 * 24 * time.Hour
@@ -34,7 +34,7 @@ func Latest(ctx context.Context, client *http.Client, url string) (Release, erro
 		return Release{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "godl-update-check")
+	req.Header.Set("User-Agent", "nimget-update-check")
 	resp, err := client.Do(req)
 	if err != nil {
 		return Release{}, err
@@ -54,8 +54,8 @@ func Latest(ctx context.Context, client *http.Client, url string) (Release, erro
 		return Release{}, fmt.Errorf("release check: unexpected tag %q", body.TagName)
 	}
 	// Only link to the project's own release pages.
-	if !strings.HasPrefix(body.HTMLURL, "https://github.com/zichuanxu/godl/") {
-		body.HTMLURL = "https://github.com/zichuanxu/godl/releases"
+	if !strings.HasPrefix(body.HTMLURL, "https://github.com/zichuanxu/nimget/") {
+		body.HTMLURL = "https://github.com/zichuanxu/nimget/releases"
 	}
 	return Release{Version: body.TagName, URL: body.HTMLURL}, nil
 }

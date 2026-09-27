@@ -2,7 +2,7 @@
 
 <img src="app/build/appicon.png" alt="NimGet logo" width="96">
 
-NimGet is a lightweight, open-source download manager built in Go for macOS and Windows. Its `godl` CLI and background service also run on Linux.
+NimGet is a lightweight, open-source download manager built in Go for macOS and Windows. Its `nimget` CLI and background service also run on Linux.
 
 - Up to 32 connections per download, rebalanced as they finish; byte-level resume, even after a crash.
 - Queue with priorities, per-host connection caps, speed limits, and a schedule.
@@ -13,22 +13,22 @@ NimGet is a lightweight, open-source download manager built in Go for macOS and 
 
 | | |
 | --- | --- |
-| macOS app | `brew install --cask zichuanxu/tap/godl-desktop`, or the `.dmg` from [Releases](https://github.com/zichuanxu/godl/releases/latest) |
-| Windows app | `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket` then `scoop install zichuanxu/godl-desktop`, or the installer from Releases |
-| CLI | `brew install zichuanxu/tap/godl`, `scoop install zichuanxu/godl`, or an archive from Releases |
+| macOS app | `brew install --cask zichuanxu/tap/nimget-desktop`, or the `.dmg` from [Releases](https://github.com/zichuanxu/nimget/releases/latest) |
+| Windows app | `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket` then `scoop install zichuanxu/nimget-desktop`, or the installer from Releases |
+| CLI | `brew install zichuanxu/tap/nimget`, `scoop install zichuanxu/nimget`, or an archive from Releases |
 
 The builds are unsigned; [docs/install.md](docs/install.md) has the one-time Gatekeeper and SmartScreen steps.
 
 ## Quick start
 
 ```bash
-godl download https://example.com/file.iso ./file.iso   # one-off download
-godl service &                                          # or run the queue in the background
-godl add https://example.com/file.iso
-godl list
+nimget download https://example.com/file.iso ./file.iso   # one-off download
+nimget service &                                          # or run the queue in the background
+nimget add https://example.com/file.iso
+nimget list
 ```
 
-The desktop app runs the same service, so `godl add` and `godl list` also work while it is open. [docs/usage.md](docs/usage.md) covers every command, the settings, and the HTTP API.
+The desktop app runs the same service, so `nimget add` and `nimget list` also work while it is open. [docs/usage.md](docs/usage.md) covers every command, the settings, and the HTTP API.
 
 ## Build from source
 
@@ -36,7 +36,7 @@ Requires Go 1.25+. The desktop app also needs Node.js 22 and, on macOS, the Xcod
 
 ```bash
 go test ./...
-go build -o godl ./cmd/godl
+go build -o nimget ./cmd/nimget
 ```
 
 Run the desktop app from source (it lives in `app/`, its own Go module):
@@ -46,7 +46,7 @@ cd app/frontend && npm ci && npm run build && cd ..
 go run .
 ```
 
-For live reload of the UI, keep `npm run dev` running in `app/frontend` and start the app with `FRONTEND_DEVSERVER_URL=http://127.0.0.1:9245 go run .`. Quit any installed NimGet or `godl service` first: they share port 51000 and a single-instance lock.
+For live reload of the UI, keep `npm run dev` running in `app/frontend` and start the app with `FRONTEND_DEVSERVER_URL=http://127.0.0.1:9245 go run .`. Quit any installed NimGet or `nimget service` first: they share port 51000 and a single-instance lock.
 
 After changing a bound Go method or type, regenerate the TypeScript bindings (CI checks them):
 
@@ -60,7 +60,7 @@ Release packages come from `app/scripts/package-macos.sh` and `app/scripts/packa
 ## Repository layout
 
 ```text
-cmd/godl/             Cobra CLI: service, add, list, set, pause, resume, retry, delete, settings, export, import, download, version
+cmd/nimget/             Cobra CLI: service, add, list, set, pause, resume, retry, delete, settings, export, import, download, version
 internal/download/    Shared queue model, errors, and event contract
 internal/engine/      Download engine: work-stealing ranges, checkpoints, validation
 internal/filelock/    OS advisory file locks

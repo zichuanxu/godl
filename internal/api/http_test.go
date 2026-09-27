@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/api"
-	"github.com/zichuanxu/godl/internal/download"
-	"github.com/zichuanxu/godl/internal/settings"
+	"github.com/zichuanxu/nimget/internal/api"
+	"github.com/zichuanxu/nimget/internal/download"
+	"github.com/zichuanxu/nimget/internal/settings"
 )
 
 const token = "test-token"

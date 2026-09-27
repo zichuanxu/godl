@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/nimget/internal/download"
 )
 
 // hlsServer serves an AES-128 encrypted media playlist at /v/index.m3u8 and

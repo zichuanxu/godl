@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/netproxy"
+	"github.com/zichuanxu/nimget/internal/netproxy"
 )
 
 const (

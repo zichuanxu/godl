@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	service = "godl"
+	service = "nimget"
 	account = "database-key"
 	prefix  = "sealed:v1:"
 )
@@ -97,7 +97,7 @@ func keyFromKeyring() ([]byte, error) {
 	}
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(key) != 32 {
-		return nil, errors.New("keyring holds a malformed godl key")
+		return nil, errors.New("keyring holds a malformed nimget key")
 	}
 	return key, nil
 }

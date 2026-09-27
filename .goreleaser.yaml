@@ -1,11 +1,11 @@
 version: 2
 
-project_name: godl
+project_name: nimget
 
 builds:
-  - id: godl
-    main: ./cmd/godl
-    binary: godl
+  - id: nimget
+    main: ./cmd/nimget
+    binary: nimget
     env:
       - CGO_ENABLED=0
     goos:
@@ -22,9 +22,9 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
 
 archives:
-  - id: godl
+  - id: nimget
     ids:
-      - godl
+      - nimget
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -52,8 +52,8 @@ release:
 
     | | |
     | --- | --- |
-    | macOS app | `godl-desktop_{{ .Version }}_macos_universal.dmg`, or `brew install --cask zichuanxu/tap/godl-desktop` |
-    | Windows app | `godl-desktop_{{ .Version }}_windows_amd64_setup.exe`, or `scoop install zichuanxu/godl-desktop` after `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket` |
-    | CLI and service | the `godl_{{ .Version }}_*` archives, `brew install zichuanxu/tap/godl`, or `scoop install zichuanxu/godl` after adding the bucket |
+    | macOS app | `nimget-desktop_{{ .Version }}_macos_universal.dmg`, or `brew install --cask zichuanxu/tap/nimget-desktop` |
+    | Windows app | `nimget-desktop_{{ .Version }}_windows_amd64_setup.exe`, or `scoop install zichuanxu/nimget-desktop` after `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket` |
+    | CLI and service | the `nimget_{{ .Version }}_*` archives, `brew install zichuanxu/tap/nimget`, or `scoop install zichuanxu/nimget` after adding the bucket |
 
-    The builds are not signed. See [docs/install.md](https://github.com/zichuanxu/godl/blob/main/docs/install.md) for the one-time Gatekeeper and SmartScreen steps. Desktop checksums are in `desktop-checksums.txt`.
+    The builds are not signed. See [docs/install.md](https://github.com/zichuanxu/nimget/blob/main/docs/install.md) for the one-time Gatekeeper and SmartScreen steps. Desktop checksums are in `desktop-checksums.txt`.

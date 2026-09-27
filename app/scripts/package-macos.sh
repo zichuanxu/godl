@@ -16,12 +16,12 @@ export CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=12.0
 export CGO_CFLAGS=-mmacosx-version-min=12.0 CGO_LDFLAGS=-mmacosx-version-min=12.0
 ldflags="-s -w -X main.version=v${version}"
 for arch in arm64 amd64; do
-  GOARCH="$arch" go build -tags production -trimpath -ldflags "$ldflags" -o "$work/godl-$arch" .
+  GOARCH="$arch" go build -tags production -trimpath -ldflags "$ldflags" -o "$work/nimget-$arch" .
 done
 
 app="$work/NimGet.app/Contents"
 mkdir -p "$app/MacOS" "$app/Resources"
-lipo -create -output "$app/MacOS/godl" "$work/godl-arm64" "$work/godl-amd64"
+lipo -create -output "$app/MacOS/nimget" "$work/nimget-arm64" "$work/nimget-amd64"
 cp build/darwin/icons.icns "$app/Resources/icons.icns"
 # CFBundleVersion is numeric (1.0.0-rc.1 becomes 1.0.0); the short version
 # string shows the full release name.
@@ -31,7 +31,7 @@ plutil -replace CFBundleShortVersionString -string "$version" "$app/Info.plist"
 codesign --force --deep --sign - "$work/NimGet.app"
 codesign --verify --deep "$work/NimGet.app"
 
-name="godl-desktop_${version}_macos_universal"
+name="nimget-desktop_${version}_macos_universal"
 ditto -c -k --sequesterRsrc --keepParent "$work/NimGet.app" "$out/$name.zip"
 
 staging="$work/dmg"

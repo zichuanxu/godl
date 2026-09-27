@@ -53,7 +53,7 @@ func Prepare(action Action) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "osascript", "-e", `tell application "System Events" to get name`).CombinedOutput(); err != nil {
-		return fmt.Errorf("godl may not control System Events, so it cannot shut down: %w: %s", err, out)
+		return fmt.Errorf("nimget may not control System Events, so it cannot shut down: %w: %s", err, out)
 	}
 	return nil
 }

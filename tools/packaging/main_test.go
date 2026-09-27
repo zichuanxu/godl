@@ -12,9 +12,9 @@ func TestRenderManifests(t *testing.T) {
 	dir := t.TempDir()
 	var sums strings.Builder
 	for i, name := range []string{
-		"godl_1.2.3_darwin_arm64.tar.gz", "godl_1.2.3_darwin_amd64.tar.gz", "godl_1.2.3_linux_arm64.tar.gz",
-		"godl_1.2.3_linux_amd64.tar.gz", "godl_1.2.3_windows_amd64.zip", "godl-desktop_1.2.3_macos_universal.dmg",
-		"godl-desktop_1.2.3_windows_amd64.zip", "godl-desktop_1.2.3_windows_amd64_setup.exe",
+		"nimget_1.2.3_darwin_arm64.tar.gz", "nimget_1.2.3_darwin_amd64.tar.gz", "nimget_1.2.3_linux_arm64.tar.gz",
+		"nimget_1.2.3_linux_amd64.tar.gz", "nimget_1.2.3_windows_amd64.zip", "nimget-desktop_1.2.3_macos_universal.dmg",
+		"nimget-desktop_1.2.3_windows_amd64.zip", "nimget-desktop_1.2.3_windows_amd64_setup.exe",
 	} {
 		fmt.Fprintf(&sums, "%064x  %s\n", i+1, name)
 	}
@@ -26,15 +26,15 @@ func TestRenderManifests(t *testing.T) {
 	if err := run("1.2.3", []string{path}, out); err != nil {
 		t.Fatal(err)
 	}
-	cask, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Casks/godl-desktop.rb"))
+	cask, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Casks/nimget-desktop.rb"))
 	if !strings.Contains(string(cask), fmt.Sprintf(`sha256 "%064x"`, 6)) || !strings.Contains(string(cask), `version "1.2.3"`) || !strings.Contains(string(cask), `app "NimGet.app"`) {
 		t.Fatalf("cask:\n%s", cask)
 	}
-	scoop, _ := os.ReadFile(filepath.Join(out, "scoop-bucket/bucket/godl-desktop.json"))
-	if !strings.Contains(string(scoop), `"shortcuts": [["godl.exe", "NimGet"]]`) {
+	scoop, _ := os.ReadFile(filepath.Join(out, "scoop-bucket/bucket/nimget-desktop.json"))
+	if !strings.Contains(string(scoop), `"shortcuts": [["nimget.exe", "NimGet"]]`) {
 		t.Fatalf("scoop desktop:\n%s", scoop)
 	}
-	formula, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Formula/godl.rb"))
+	formula, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Formula/nimget.rb"))
 	if strings.Count(string(formula), "sha256") != 4 {
 		t.Fatalf("formula:\n%s", formula)
 	}

@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/nimget/internal/download"
 )
 
 func TestBrokerDisconnectsLaggingSubscriber(t *testing.T) {

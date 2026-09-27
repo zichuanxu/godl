@@ -49,7 +49,7 @@ export class State {
 
     /**
      * Error is set when the service failed to start, for example because a
-     * headless "godl service" already holds the loopback port.
+     * headless "nimget service" already holds the loopback port.
      */
     "error"?: string;
     "defaultDirectory": string;

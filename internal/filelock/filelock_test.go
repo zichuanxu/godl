@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const helperEnv = "GODL_FILELOCK_HELPER"
+const helperEnv = "NIMGET_FILELOCK_HELPER"
 
 // TestMain lets the test binary act as a lock-holding child process.
 func TestMain(m *testing.M) {

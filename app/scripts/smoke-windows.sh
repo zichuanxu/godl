@@ -4,30 +4,30 @@
 # download with the CLI through the app's embedded service, verifies the file,
 # and uninstalls.
 #
-#   scripts/smoke-windows.sh godl-desktop_1.0.0_windows_amd64_setup.exe path/to/godl.exe
+#   scripts/smoke-windows.sh nimget-desktop_1.0.0_windows_amd64_setup.exe path/to/nimget.exe
 set -euo pipefail
 
 setup="$1"
 cli="$2"
 work="$(mktemp -d)"
-installdir="$LOCALAPPDATA/Programs/godl"
+installdir="$LOCALAPPDATA/Programs/nimget"
 cleanup() {
-  taskkill //IM godl.exe //F >/dev/null 2>&1 || true
+  taskkill //IM nimget.exe //F >/dev/null 2>&1 || true
   if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
   rm -rf "$work" || true
 }
 diagnose() {
   echo "== diagnostics"
   "$cli" --token-file "$token" list 2>&1 || true
-  tail -n 40 "$APPDATA/godl/godl.log" 2>/dev/null || true
+  tail -n 40 "$APPDATA/nimget/nimget.log" 2>/dev/null || true
 }
 trap 'status=$?; [ $status -ne 0 ] && [ -n "${token:-}" ] && diagnose; cleanup' EXIT
 
 echo "== install"
 cmd //c "$(cygpath -w "$setup") /S"
-for _ in $(seq 1 30); do [ -f "$installdir/godl.exe" ] && break; sleep 1; done
-[ -f "$installdir/godl.exe" ] || { echo "not installed"; exit 1; }
-powershell -NoProfile -Command "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\godl' | Select-Object DisplayName, DisplayVersion"
+for _ in $(seq 1 30); do [ -f "$installdir/nimget.exe" ] && break; sleep 1; done
+[ -f "$installdir/nimget.exe" ] || { echo "not installed"; exit 1; }
+powershell -NoProfile -Command "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\nimget' | Select-Object DisplayName, DisplayVersion"
 
 echo "== serve a test file"
 mkdir -p "$work/www"
@@ -40,8 +40,8 @@ for _ in $(seq 1 30); do curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 
 echo "== launch"
-powershell -NoProfile -Command "Start-Process -FilePath '$(cygpath -w "$installdir/godl.exe")'"
-token="$APPDATA/godl/token"
+powershell -NoProfile -Command "Start-Process -FilePath '$(cygpath -w "$installdir/nimget.exe")'"
+token="$APPDATA/nimget/token"
 for _ in $(seq 1 150); do
   "$cli" --token-file "$token" list >/dev/null 2>&1 && break
   sleep 1
@@ -49,7 +49,7 @@ done
 "$cli" --token-file "$token" list >/dev/null
 
 echo "== download"
-dest="$(cygpath -w "$USERPROFILE/Downloads/godl-smoke-$$.bin")"
+dest="$(cygpath -w "$USERPROFILE/Downloads/nimget-smoke-$$.bin")"
 "$cli" --token-file "$token" add "http://127.0.0.1:18790/payload.bin" "$dest" >/dev/null
 for _ in $(seq 1 120); do [ -f "$dest" ] && break; sleep 1; done
 got="$(sha256sum < "$dest" | cut -d' ' -f1)"
@@ -61,8 +61,8 @@ motw
 rm -f "$dest"
 
 echo "== uninstall"
-taskkill //IM godl.exe //F >/dev/null 2>&1 || true
+taskkill //IM nimget.exe //F >/dev/null 2>&1 || true
 cmd //c "$(cygpath -w "$installdir/uninstall.exe") /S"
-for _ in $(seq 1 30); do [ ! -f "$installdir/godl.exe" ] && break; sleep 1; done
-[ ! -f "$installdir/godl.exe" ] || { echo "not uninstalled"; exit 1; }
+for _ in $(seq 1 30); do [ ! -f "$installdir/nimget.exe" ] && break; sleep 1; done
+[ ! -f "$installdir/nimget.exe" ] || { echo "not uninstalled"; exit 1; }
 echo "install-to-download OK"

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/nimget/internal/download"
 )
 
 const version = 1

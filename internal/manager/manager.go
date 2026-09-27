@@ -19,10 +19,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/download"
-	"github.com/zichuanxu/godl/internal/hls"
-	"github.com/zichuanxu/godl/internal/logging"
-	"github.com/zichuanxu/godl/internal/settings"
+	"github.com/zichuanxu/nimget/internal/download"
+	"github.com/zichuanxu/nimget/internal/hls"
+	"github.com/zichuanxu/nimget/internal/logging"
+	"github.com/zichuanxu/nimget/internal/settings"
 	"golang.org/x/time/rate"
 )
 

@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/api"
-	"github.com/zichuanxu/godl/internal/download"
-	"github.com/zichuanxu/godl/internal/engine"
-	"github.com/zichuanxu/godl/internal/manager"
-	"github.com/zichuanxu/godl/internal/netproxy"
-	"github.com/zichuanxu/godl/internal/secrets"
-	"github.com/zichuanxu/godl/internal/store"
+	"github.com/zichuanxu/nimget/internal/api"
+	"github.com/zichuanxu/nimget/internal/download"
+	"github.com/zichuanxu/nimget/internal/engine"
+	"github.com/zichuanxu/nimget/internal/manager"
+	"github.com/zichuanxu/nimget/internal/netproxy"
+	"github.com/zichuanxu/nimget/internal/secrets"
+	"github.com/zichuanxu/nimget/internal/store"
 )
 
 type Config struct {

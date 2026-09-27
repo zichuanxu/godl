@@ -1,4 +1,4 @@
-// Command godl-desktop is the NimGet desktop app: the download service runs in
+// Command nimget-desktop is the NimGet desktop app: the download service runs in
 // this process, the React UI talks to it through Wails bindings and events,
 // and the loopback API stays up for the CLI (DESIGN.md section 1).
 package main
@@ -36,7 +36,7 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: false, // keep downloading from the tray
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID:               "io.github.zichuanxu.godl",
+			UniqueID:               "io.github.zichuanxu.nimget",
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) { desk.show() },
 		},
 	})

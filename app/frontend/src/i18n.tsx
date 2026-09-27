@@ -58,7 +58,7 @@ const en = {
   "drop.title": "Drop to download",
   "drop.body": "Links and cURL commands",
 
-  "banner.serviceError": "The download service could not start: {error}. If godl service is running, stop it and reopen NimGet.",
+  "banner.serviceError": "The download service could not start: {error}. If nimget service is running, stop it and reopen NimGet.",
   "banner.update": "NimGet {version} is available.",
   "banner.releaseNotes": "View release",
   "banner.dismiss": "Dismiss",
@@ -224,7 +224,7 @@ const zh: Record<Key, string> = {
   "drop.title": "松开即可下载",
   "drop.body": "支持链接和 cURL 命令",
 
-  "banner.serviceError": "下载服务无法启动：{error}。如果 godl service 正在运行，请先停止它，再重新打开 NimGet。",
+  "banner.serviceError": "下载服务无法启动：{error}。如果 nimget service 正在运行，请先停止它，再重新打开 NimGet。",
   "banner.update": "NimGet {version} 已发布。",
   "banner.releaseNotes": "查看版本",
   "banner.dismiss": "忽略",

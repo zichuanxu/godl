@@ -8,7 +8,7 @@ import (
 )
 
 func TestRotatingFileKeepsBoundedCopies(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "godl.log")
+	path := filepath.Join(t.TempDir(), "nimget.log")
 	r, err := OpenRotating(path, 100, 3)
 	if err != nil {
 		t.Fatal(err)

@@ -1,12 +1,12 @@
 //go:build unix
 
-// Command bench measures godl against aria2c on a local server that caps
+// Command bench measures nimget against aria2c on a local server that caps
 // each connection's bandwidth, as CDNs do, and checks the M1 performance gate
 // in DESIGN.md section 8:
 //
 //	throughput >= 95% of aria2c, < 1 CPU core at 1 Gbps, RSS < 100 MB
 //
-// Usage: go build -o godl ./cmd/godl && go run ./tools/bench -godl ./godl -gate
+// Usage: go build -o nimget ./cmd/nimget && go run ./tools/bench -nimget ./nimget -gate
 package main
 
 import (
@@ -46,7 +46,7 @@ func (r result) coresAt1Gbps() float64 {
 }
 
 func main() {
-	godl := flag.String("godl", "./godl", "path to the godl binary")
+	nimget := flag.String("nimget", "./nimget", "path to the nimget binary")
 	aria := flag.String("aria2c", "aria2c", "path to aria2c; skipped when missing")
 	sizeMiB := flag.Int("size", 256, "throttled file size in MiB")
 	rawMiB := flag.Int("raw-size", 512, "unthrottled file size in MiB")
@@ -62,7 +62,7 @@ func main() {
 		return
 	}
 
-	dir, err := os.MkdirTemp("", "godl-bench-")
+	dir, err := os.MkdirTemp("", "nimget-bench-")
 	check(err)
 	defer os.RemoveAll(dir)
 
@@ -74,8 +74,8 @@ func main() {
 	// Each figure is the best of three runs, which keeps scheduler noise on
 	// shared CI runners out of the 95% comparison.
 	var rows []result
-	godlThrottled := best(func() result { return runGodl(*godl, throttled, dir, "godl (capped)", *conns) })
-	rows = append(rows, godlThrottled)
+	nimgetThrottled := best(func() result { return runNimget(*nimget, throttled, dir, "nimget (capped)", *conns) })
+	rows = append(rows, nimgetThrottled)
 	var ariaThrottled *result
 	if _, err := exec.LookPath(*aria); err == nil {
 		r := best(func() result { return runAria(*aria, throttled, dir, "aria2c (capped)", *conns) })
@@ -84,8 +84,8 @@ func main() {
 	} else {
 		fmt.Printf("aria2c not found (%s); skipping the comparison\n\n", *aria)
 	}
-	godlRaw := best(func() result { return runGodl(*godl, unthrottled, dir, "godl (uncapped)", *conns) })
-	rows = append(rows, godlRaw)
+	nimgetRaw := best(func() result { return runNimget(*nimget, unthrottled, dir, "nimget (uncapped)", *conns) })
+	rows = append(rows, nimgetRaw)
 	if ariaThrottled != nil {
 		rows = append(rows, best(func() result { return runAria(*aria, unthrottled, dir, "aria2c (uncapped)", *conns) }))
 	}
@@ -98,7 +98,7 @@ func main() {
 	}
 
 	var failures []string
-	for _, r := range []result{godlThrottled, godlRaw} {
+	for _, r := range []result{nimgetThrottled, nimgetRaw} {
 		if !r.correct {
 			failures = append(failures, r.name+": output differs from the source")
 		}
@@ -106,14 +106,14 @@ func main() {
 			failures = append(failures, fmt.Sprintf("%s: max RSS %.1f MB >= 100 MB", r.name, float64(r.maxRSS)/1e6))
 		}
 	}
-	if c := godlRaw.coresAt1Gbps(); c >= 1 {
-		failures = append(failures, fmt.Sprintf("godl uses %.2f cores at 1 Gbps; limit is 1", c))
+	if c := nimgetRaw.coresAt1Gbps(); c >= 1 {
+		failures = append(failures, fmt.Sprintf("nimget uses %.2f cores at 1 Gbps; limit is 1", c))
 	}
 	if ariaThrottled != nil {
-		if ratio := godlThrottled.mbps() / ariaThrottled.mbps(); ratio < 0.95 {
-			failures = append(failures, fmt.Sprintf("godl throughput is %.0f%% of aria2c; gate is 95%%", ratio*100))
+		if ratio := nimgetThrottled.mbps() / ariaThrottled.mbps(); ratio < 0.95 {
+			failures = append(failures, fmt.Sprintf("nimget throughput is %.0f%% of aria2c; gate is 95%%", ratio*100))
 		} else {
-			fmt.Printf("\ngodl throughput is %.0f%% of aria2c\n", ratio*100)
+			fmt.Printf("\nnimget throughput is %.0f%% of aria2c\n", ratio*100)
 		}
 	}
 	if len(failures) == 0 {
@@ -224,7 +224,7 @@ func serve(data []byte, rate float64) source {
 	return source{url: "http://" + listener.Addr().String() + "/file.bin", size: int64(len(data)), sum: sha256.Sum256(data)}
 }
 
-func runGodl(bin string, src source, dir, name string, conns int) result {
+func runNimget(bin string, src source, dir, name string, conns int) result {
 	out := filepath.Join(dir, strings.NewReplacer(" ", "-", "(", "", ")", "").Replace(name))
 	return measure(name, src, out, exec.Command(bin, "download", "--connections", strconv.Itoa(conns), src.url, out))
 }

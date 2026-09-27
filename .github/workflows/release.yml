@@ -113,8 +113,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p 'godl-desktop_*' -D assets
-          (cd assets && sha256sum godl-desktop_* > ../desktop-checksums.txt)
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p 'nimget-desktop_*' -D assets
+          (cd assets && sha256sum nimget-desktop_* > ../desktop-checksums.txt)
           cat desktop-checksums.txt
           gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" desktop-checksums.txt --clobber
 
@@ -130,11 +130,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#v}"
-          gh release download "$GITHUB_REF_NAME" -p "godl-desktop_${v}_macos_universal.dmg" -p "godl_${v}_darwin_arm64.tar.gz" -D assets
-          tar -xzf "assets/godl_${v}_darwin_arm64.tar.gz" -C assets godl
+          gh release download "$GITHUB_REF_NAME" -p "nimget-desktop_${v}_macos_universal.dmg" -p "nimget_${v}_darwin_arm64.tar.gz" -D assets
+          tar -xzf "assets/nimget_${v}_darwin_arm64.tar.gz" -C assets nimget
 
       - name: install, launch, and download
-        run: app/scripts/smoke-macos.sh assets/godl-desktop_*_macos_universal.dmg assets/godl
+        run: app/scripts/smoke-macos.sh assets/nimget-desktop_*_macos_universal.dmg assets/nimget
 
   smoke-windows:
     needs: desktop-checksums
@@ -150,11 +150,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#v}"
-          gh release download "$GITHUB_REF_NAME" -p "godl-desktop_${v}_windows_amd64_setup.exe" -p "godl_${v}_windows_amd64.zip" -D assets
-          unzip -o "assets/godl_${v}_windows_amd64.zip" godl.exe -d assets
+          gh release download "$GITHUB_REF_NAME" -p "nimget-desktop_${v}_windows_amd64_setup.exe" -p "nimget_${v}_windows_amd64.zip" -D assets
+          unzip -o "assets/nimget_${v}_windows_amd64.zip" nimget.exe -d assets
 
       - name: install, launch, download, and uninstall
-        run: app/scripts/smoke-windows.sh assets/godl-desktop_*_setup.exe assets/godl.exe
+        run: app/scripts/smoke-windows.sh assets/nimget-desktop_*_setup.exe assets/nimget.exe
 
   # The release was created as a draft; publish it only now.
   publish:
@@ -201,7 +201,7 @@ jobs:
             echo "::notice::TAP_TOKEN is not set; push package-manifests.zip by hand"
             exit 0
           fi
-          git config --global user.name "godl release"
+          git config --global user.name "nimget release"
           git config --global user.email "zichuanxu28@gmail.com"
           # gh supplies the token to git without writing it into .git/config.
           export GH_TOKEN="$TAP_TOKEN"
@@ -210,7 +210,7 @@ jobs:
             gh repo clone "zichuanxu/${repo}" "/tmp/${repo}" -- -q
             cp -R "manifests/${repo}/." "/tmp/${repo}/"
             git -C "/tmp/${repo}" add -A
-            git -C "/tmp/${repo}" commit -qm "godl ${GITHUB_REF_NAME}" || continue
+            git -C "/tmp/${repo}" commit -qm "nimget ${GITHUB_REF_NAME}" || continue
             git -C "/tmp/${repo}" push -q
           done
 

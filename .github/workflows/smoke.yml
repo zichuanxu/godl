@@ -28,10 +28,10 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           v="${TAG#v}"
-          gh release download "$TAG" -p "godl-desktop_${v}_windows_amd64_setup.exe" -p "godl_${v}_windows_amd64.zip" -D assets
-          unzip -o "assets/godl_${v}_windows_amd64.zip" godl.exe -d assets
+          gh release download "$TAG" -p "nimget-desktop_${v}_windows_amd64_setup.exe" -p "nimget_${v}_windows_amd64.zip" -D assets
+          unzip -o "assets/nimget_${v}_windows_amd64.zip" nimget.exe -d assets
 
-      - run: app/scripts/smoke-windows.sh assets/godl-desktop_*_setup.exe assets/godl.exe
+      - run: app/scripts/smoke-windows.sh assets/nimget-desktop_*_setup.exe assets/nimget.exe
 
   macos:
     runs-on: macos-latest
@@ -44,10 +44,10 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           v="${TAG#v}"
-          gh release download "$TAG" -p "godl-desktop_${v}_macos_universal.dmg" -p "godl_${v}_darwin_arm64.tar.gz" -D assets
-          tar -xzf "assets/godl_${v}_darwin_arm64.tar.gz" -C assets godl
+          gh release download "$TAG" -p "nimget-desktop_${v}_macos_universal.dmg" -p "nimget_${v}_darwin_arm64.tar.gz" -D assets
+          tar -xzf "assets/nimget_${v}_darwin_arm64.tar.gz" -C assets nimget
 
-      - run: app/scripts/smoke-macos.sh assets/godl-desktop_*_macos_universal.dmg assets/godl
+      - run: app/scripts/smoke-macos.sh assets/nimget-desktop_*_macos_universal.dmg assets/nimget
 
   # Installs both Scoop packages from zichuanxu/scoop-bucket, as a user would.
   scoop:
@@ -61,6 +61,6 @@ jobs:
           .\install.ps1 -RunAsAdmin
           $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
           scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket
-          scoop install zichuanxu/godl zichuanxu/godl-desktop
-          godl version
-          if (-not (Test-Path "$env:USERPROFILE\scoop\apps\godl-desktop\current\godl.exe")) { throw "godl-desktop missing" }
+          scoop install zichuanxu/nimget zichuanxu/nimget-desktop
+          nimget version
+          if (-not (Test-Path "$env:USERPROFILE\scoop\apps\nimget-desktop\current\nimget.exe")) { throw "nimget-desktop missing" }

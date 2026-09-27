@@ -38,7 +38,7 @@ func TestCheckPollsWeekly(t *testing.T) {
 	tag := "v1.2.0"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://github.com/zichuanxu/godl/releases/tag/` + tag + `"}`))
+		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","html_url":"https://github.com/zichuanxu/nimget/releases/tag/` + tag + `"}`))
 	}))
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "update.json")
@@ -73,7 +73,7 @@ func TestLatestRejectsForeignLinks(t *testing.T) {
 	}))
 	defer server.Close()
 	rel, err := Latest(context.Background(), server.Client(), server.URL)
-	if err != nil || rel.URL != "https://github.com/zichuanxu/godl/releases" {
+	if err != nil || rel.URL != "https://github.com/zichuanxu/nimget/releases" {
 		t.Fatalf("rel = %+v, %v", rel, err)
 	}
 }
@@ -84,7 +84,7 @@ func TestCheckWithUnwritableState(t *testing.T) {
 	var hits atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		_, _ = w.Write([]byte(`{"tag_name":"v2.0.0","html_url":"https://github.com/zichuanxu/godl/releases/tag/v2.0.0"}`))
+		_, _ = w.Write([]byte(`{"tag_name":"v2.0.0","html_url":"https://github.com/zichuanxu/nimget/releases/tag/v2.0.0"}`))
 	}))
 	defer server.Close()
 	c := &Checker{Client: server.Client(), URL: server.URL, Path: filepath.Join(t.TempDir(), "missing-dir", "update.json")}

@@ -14,3 +14,5 @@ app/frontend/node_modules/
 .serena/
 .DS_Store
 app/bin/
+/nimget
+/nimget.exe

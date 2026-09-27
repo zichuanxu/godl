@@ -30,7 +30,7 @@ jobs:
 
       - run: go test -race ./...
 
-      - run: go build ./cmd/godl
+      - run: go build ./cmd/nimget
 
   gates:
     runs-on: ubuntu-latest
@@ -56,8 +56,8 @@ jobs:
 
       - name: CLI must not depend on wails
         run: |
-          if go list -deps ./cmd/godl | grep -q wails; then
-            echo "cmd/godl must not depend on wails"
+          if go list -deps ./cmd/nimget | grep -q wails; then
+            echo "cmd/nimget must not depend on wails"
             exit 1
           fi
 
@@ -68,12 +68,12 @@ jobs:
           for target in $targets; do
             os="${target%/*}"
             arch="${target#*/}"
-            out="godl-${os}-${arch}"
+            out="nimget-${os}-${arch}"
             if [ "$os" = "windows" ]; then
               out="${out}.exe"
             fi
             echo "building $out"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "/tmp/${out}" ./cmd/godl
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "/tmp/${out}" ./cmd/nimget
           done
 
   desktop:
@@ -116,9 +116,9 @@ jobs:
       - name: build desktop app
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            CGO_ENABLED=0 go build -tags production -ldflags "-H windowsgui" -o bin/godl.exe .
+            CGO_ENABLED=0 go build -tags production -ldflags "-H windowsgui" -o bin/nimget.exe .
           else
-            go build -tags production -o bin/godl .
+            go build -tags production -o bin/nimget .
           fi
 
   benchmark:
@@ -136,6 +136,6 @@ jobs:
       - name: performance gate against aria2c
         run: |
           set -o pipefail
-          go build -o godl ./cmd/godl
+          go build -o nimget ./cmd/nimget
           go build -o bench ./tools/bench
-          ./bench -godl ./godl -gate | tee -a "$GITHUB_STEP_SUMMARY"
+          ./bench -nimget ./nimget -gate | tee -a "$GITHUB_STEP_SUMMARY"

@@ -108,7 +108,7 @@ func TestResumeSurvivesRotatedTokens(t *testing.T) {
 	}
 }
 
-// A directory at dest.hls that godl did not create is never deleted.
+// A directory at dest.hls that nimget did not create is never deleted.
 func TestForeignWorkDirIsKept(t *testing.T) {
 	s := newServer(t)
 	clearStream(s, 2)

@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/filelock"
+	"github.com/zichuanxu/nimget/internal/filelock"
 )
 
 var (
@@ -45,7 +45,7 @@ type Limiter interface {
 type Options struct {
 	Client                  *http.Client // default: DefaultTransport clone without compression
 	Headers                 http.Header  // sent with every request
-	UserAgent               string       // default "godl/1.0"
+	UserAgent               string       // default "nimget/1.0"
 	Concurrency             int          // parallel segment fetches, default 4
 	MaxAttempts             int          // per request, default 5
 	BaseBackoff, MaxBackoff time.Duration
@@ -67,7 +67,7 @@ func (o *Options) normalize() {
 		o.Client = &http.Client{Transport: t}
 	}
 	if o.UserAgent == "" {
-		o.UserAgent = "godl/1.0"
+		o.UserAgent = "nimget/1.0"
 	}
 	if o.Concurrency <= 0 {
 		o.Concurrency = 4
@@ -366,13 +366,13 @@ func prepareWorkDir(work string, items []item) error {
 	return writeFileSynced(statePath, state)
 }
 
-// removeWorkDir deletes work only if it is godl's: it holds state.json.
+// removeWorkDir deletes work only if it is nimget's: it holds state.json.
 func removeWorkDir(work string) error {
 	if _, err := os.Lstat(work); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if _, err := os.Lstat(filepath.Join(work, "state.json")); err != nil {
-		return fmt.Errorf("%s exists and is not a godl download directory", work)
+		return fmt.Errorf("%s exists and is not a nimget download directory", work)
 	}
 	if err := os.RemoveAll(work); err != nil {
 		return fmt.Errorf("discard stale work dir: %w", err)

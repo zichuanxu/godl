@@ -11,13 +11,13 @@ import (
 	"strings"
 )
 
-// DataDir is the per-user godl directory holding the database, token, and logs.
+// DataDir is the per-user nimget directory holding the database, token, and logs.
 func DataDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("locate user config directory: %w", err)
 	}
-	dir := filepath.Join(configDir, "godl")
+	dir := filepath.Join(configDir, "nimget")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create application data directory: %w", err)
 	}
@@ -29,7 +29,7 @@ func DefaultDatabasePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "godl.db"), nil
+	return filepath.Join(dir, "nimget.db"), nil
 }
 
 // DefaultTokenPath is where the service stores, and the CLI reads, the API token.

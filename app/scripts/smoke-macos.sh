@@ -3,7 +3,7 @@
 # from the .dmg, launches it, queues a download with the CLI through the
 # app's embedded service, and verifies the file.
 #
-#   scripts/smoke-macos.sh godl-desktop_1.0.0_macos_universal.dmg path/to/godl-cli [appdir]
+#   scripts/smoke-macos.sh nimget-desktop_1.0.0_macos_universal.dmg path/to/nimget-cli [appdir]
 set -euo pipefail
 
 dmg="$1"
@@ -12,7 +12,7 @@ appdir="${3:-/Applications}"
 work="$(mktemp -d)"
 mount="$work/mnt"
 cleanup() {
-  pkill -f "$appdir/NimGet.app/Contents/MacOS/godl" 2>/dev/null || true
+  pkill -f "$appdir/NimGet.app/Contents/MacOS/nimget" 2>/dev/null || true
   if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
   hdiutil detach -quiet "$mount" 2>/dev/null || true
   rm -rf "$work"
@@ -20,7 +20,7 @@ cleanup() {
 diagnose() {
   echo "== diagnostics"
   "$cli" --token-file "$token" list 2>&1 || true
-  tail -n 40 "$HOME/Library/Application Support/godl/godl.log" 2>/dev/null || true
+  tail -n 40 "$HOME/Library/Application Support/nimget/nimget.log" 2>/dev/null || true
 }
 trap 'status=$?; [ $status -ne 0 ] && [ -n "${token:-}" ] && diagnose; cleanup' EXIT
 
@@ -42,8 +42,8 @@ for _ in $(seq 1 30); do curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 
 echo "== launch"
-"$appdir/NimGet.app/Contents/MacOS/godl" >"$work/app.log" 2>&1 &
-token="$HOME/Library/Application Support/godl/token"
+"$appdir/NimGet.app/Contents/MacOS/nimget" >"$work/app.log" 2>&1 &
+token="$HOME/Library/Application Support/nimget/token"
 for _ in $(seq 1 150); do
   "$cli" --token-file "$token" list >/dev/null 2>&1 && break
   sleep 1
@@ -51,7 +51,7 @@ done
 "$cli" --token-file "$token" list >/dev/null
 
 echo "== download"
-dest="$HOME/Downloads/godl-smoke-$$.bin"
+dest="$HOME/Downloads/nimget-smoke-$$.bin"
 "$cli" --token-file "$token" add "http://127.0.0.1:18790/payload.bin" "$dest" >/dev/null
 for _ in $(seq 1 120); do
   [ -f "$dest" ] && break

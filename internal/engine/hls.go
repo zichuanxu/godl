@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/zichuanxu/godl/internal/hls"
+	"github.com/zichuanxu/nimget/internal/hls"
 )
 
 // errPlaylist reports that the probed resource is an HLS playlist.

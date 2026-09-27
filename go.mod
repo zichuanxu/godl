@@ -1,4 +1,4 @@
-module github.com/zichuanxu/godl
+module github.com/zichuanxu/nimget
 
 go 1.25.0
 

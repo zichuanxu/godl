@@ -7,12 +7,12 @@ Unicode true
 !include "LogicLib.nsh"
 
 !define PRODUCT "NimGet"
-!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\godl"
+!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\nimget"
 
 Name "${PRODUCT} ${VERSION}"
 OutFile "${OUTFILE}"
-InstallDir "$LOCALAPPDATA\Programs\godl"
-InstallDirRegKey HKCU "Software\godl" "InstallDir"
+InstallDir "$LOCALAPPDATA\Programs\nimget"
+InstallDirRegKey HKCU "Software\nimget" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 VIProductVersion "${NUMVERSION}.0"
@@ -24,7 +24,7 @@ VIAddVersionKey "LegalCopyright" "Copyright 2026 zichuanxu. Apache-2.0."
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
-!define MUI_FINISHPAGE_RUN "$INSTDIR\godl.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\nimget.exe"
 !insertmacro MUI_PAGE_LICENSE "${LICENSE}"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -51,20 +51,19 @@ FunctionEnd
 
 Section "NimGet"
   ; Quit a running copy so its files can be replaced.
-  nsExec::Exec 'taskkill /IM godl.exe /F'
+  nsExec::Exec 'taskkill /IM nimget.exe /F'
   SetOutPath "$INSTDIR"
-  File "/oname=godl.exe" "${BINARY}"
+  File "/oname=nimget.exe" "${BINARY}"
   File "/oname=LICENSE.txt" "${LICENSE}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
-  Delete "$SMPROGRAMS\godl.lnk"
-  CreateShortcut "$SMPROGRAMS\NimGet.lnk" "$INSTDIR\godl.exe"
-  WriteRegStr HKCU "Software\godl" "InstallDir" "$INSTDIR"
+  CreateShortcut "$SMPROGRAMS\NimGet.lnk" "$INSTDIR\nimget.exe"
+  WriteRegStr HKCU "Software\nimget" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "NimGet"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "zichuanxu"
-  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\godl.exe"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\nimget.exe"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://github.com/zichuanxu/godl"
+  WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://github.com/zichuanxu/nimget"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
@@ -72,18 +71,15 @@ Section "NimGet"
   Call CheckWebView2
 SectionEnd
 
-; Downloads, settings, and logs in %AppData%\godl are the user's and stay.
+; Downloads, settings, and logs in %AppData%\nimget are the user's and stay.
 Section "Uninstall"
-  nsExec::Exec 'taskkill /IM godl.exe /F'
-  Delete "$SMPROGRAMS\godl.lnk"
+  nsExec::Exec 'taskkill /IM nimget.exe /F'
   Delete "$SMPROGRAMS\NimGet.lnk"
-  Delete "$INSTDIR\godl.exe"
+  Delete "$INSTDIR\nimget.exe"
   Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
-  DeleteRegKey HKCU "Software\godl"
-  ; Wails uses the app name for new autostart entries; remove the old name too.
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "godl"
+  DeleteRegKey HKCU "Software\nimget"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "nimget"
 SectionEnd

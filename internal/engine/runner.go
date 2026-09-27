@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/zichuanxu/godl/internal/download"
-	"github.com/zichuanxu/godl/internal/hls"
+	"github.com/zichuanxu/nimget/internal/download"
+	"github.com/zichuanxu/nimget/internal/hls"
 )
 
 // Runner adapts the engine to the service's download.Runner contract. Every

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/nimget/internal/download"
 )
 
 func TestRunnerDownloadsWithDynamicRanges(t *testing.T) {

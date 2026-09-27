@@ -16,14 +16,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zichuanxu/godl/internal/client"
-	"github.com/zichuanxu/godl/internal/download"
-	"github.com/zichuanxu/godl/internal/service"
+	"github.com/zichuanxu/nimget/internal/client"
+	"github.com/zichuanxu/nimget/internal/download"
+	"github.com/zichuanxu/nimget/internal/service"
 )
 
-const mainEnv = "GODL_TEST_RUN_MAIN"
+const mainEnv = "NIMGET_TEST_RUN_MAIN"
 
-// TestMain lets the test binary act as the godl executable in child processes.
+// TestMain lets the test binary act as the nimget executable in child processes.
 func TestMain(m *testing.M) {
 	if os.Getenv(mainEnv) == "1" {
 		main()
@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func godl(args ...string) *exec.Cmd {
+func nimget(args ...string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.Env = append(os.Environ(), mainEnv+"=1")
 	return cmd
@@ -83,9 +83,9 @@ type serviceProcess struct {
 func startServiceProcess(t *testing.T, dir, root string) *serviceProcess {
 	t.Helper()
 	tokenPath := filepath.Join(dir, "token")
-	cmd := godl("service",
+	cmd := nimget("service",
 		"--listen", "127.0.0.1:0",
-		"--database", filepath.Join(dir, "godl.db"),
+		"--database", filepath.Join(dir, "nimget.db"),
 		"--token-file", tokenPath,
 		"--download-root", root,
 		"--log-level", "error",
@@ -106,7 +106,7 @@ func startServiceProcess(t *testing.T, dir, root string) *serviceProcess {
 	if err != nil {
 		t.Fatalf("service did not report its address: %v", err)
 	}
-	address, ok := strings.CutPrefix(strings.TrimSpace(line), "godl service listening on ")
+	address, ok := strings.CutPrefix(strings.TrimSpace(line), "nimget service listening on ")
 	if !ok {
 		t.Fatalf("unexpected service output %q", line)
 	}
@@ -215,8 +215,8 @@ func TestServiceResumesAfterKill(t *testing.T) {
 }
 
 func TestVersionCommand(t *testing.T) {
-	out, err := godl("version").CombinedOutput()
-	if err != nil || !strings.HasPrefix(string(out), "godl dev (commit none") {
+	out, err := nimget("version").CombinedOutput()
+	if err != nil || !strings.HasPrefix(string(out), "nimget dev (commit none") {
 		t.Fatalf("version output = %q, %v", out, err)
 	}
 }
