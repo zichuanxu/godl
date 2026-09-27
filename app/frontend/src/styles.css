@@ -254,15 +254,23 @@ html.mac .sidebar { background: var(--sidebar-glass); padding-top: 12px; }
 .version { font-size: 11px; color: var(--text-3); font-weight: 400; font-variant-numeric: tabular-nums; }
 
 .speed-card {
-  padding: 12px 12px 8px; border-radius: var(--r-lg); background: var(--surface);
+  padding: 12px 14px 10px; border-radius: var(--r-lg); background: var(--surface);
   border: 1px solid var(--border); box-shadow: var(--shadow-sm);
 }
-.speed-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); }
-.speed-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-html[lang="zh-CN"] .speed-label { text-transform: none; letter-spacing: 0; }
-.speed-value.idle { color: var(--text-3); }
-.speed-value { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
-.sparkline { display: block; width: 100%; height: 34px; }
+.speed-card.idle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: transparent; box-shadow: none; }
+.speed-icon { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center; color: var(--text-3); background: var(--track); }
+.speed-idle-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.speed-idle-text strong { font-weight: 600; font-size: 12.5px; }
+.speed-idle-text span { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.speed-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
+.speed-live { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.6s infinite; }
+.speed-queued { color: var(--text-3); white-space: nowrap; }
+.speed-value { margin: 6px 0 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.speed-unit { margin-left: 4px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--text-2); }
+.speed-value.connecting { font-size: 15px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
+.speed-eta { margin-top: 2px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sparkline { display: block; width: 100%; height: 36px; margin-top: 4px; overflow: visible; }
 .sparkline .line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }

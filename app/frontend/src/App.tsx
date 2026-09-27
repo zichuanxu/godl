@@ -16,6 +16,8 @@ import {
   FolderInput,
   FolderOpen,
   FolderOutput,
+  Gauge,
+  Hourglass,
   Inbox,
   KeyRound,
   Layers,
@@ -269,7 +271,6 @@ function Shell() {
   const rows = all.filter((i) => matches(i, filter) && (!q || baseName(i.destination).toLowerCase().includes(q) || i.url.toLowerCase().includes(q)));
   const current = selected ? items.get(selected) : undefined;
   const totalSpeed = history[history.length - 1] ?? 0;
-  const running = all.filter((i) => i.status === Status.StatusRunning).length;
   const modalOpen = !!(adding || settingsOpen || deleting || reauth || countdown);
 
   const actions = (item: Item): Action[] => {
@@ -376,14 +377,13 @@ function Shell() {
           ))}
         </nav>
         <div className="grow" />
-        <div className="speed-card">
-          <div className="speed-top">
-            <span className="speed-label">{t("speed.title")}</span>
-            <span className="speed-active">{running > 0 ? t("speed.active", { n: running }) : t("speed.idle")}</span>
-          </div>
-          <div className={`speed-value ${totalSpeed > 0 ? "" : "idle"}`}>{totalSpeed > 0 ? speed(totalSpeed) : "—"}</div>
-          <Sparkline values={history} />
-        </div>
+        <SpeedCard
+          running={all.filter((i) => i.status === Status.StatusRunning)}
+          queued={all.filter((i) => i.status === Status.StatusQueued).length}
+          rate={(id) => samples.current.get(id)?.bps ?? 0}
+          bps={totalSpeed}
+          history={history}
+        />
         <button className="nav-item" onClick={() => setSettingsOpen(true)} title={`${t("nav.settings")} (${isMac ? "⌘" : "Ctrl+"},)`}>
           <SettingsIcon size={16} />
           <span className="grow">{t("nav.settings")}</span>
@@ -642,6 +642,47 @@ function Row({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** SpeedCard is a compact status line when idle and a live readout while downloading. */
+function SpeedCard({ running, queued, rate, bps, history }: { running: Item[]; queued: number; rate: (id: string) => number; bps: number; history: number[] }) {
+  const { t } = useI18n();
+  if (running.length === 0) {
+    return (
+      <div className="speed-card idle">
+        <span className="speed-icon">{queued > 0 ? <Hourglass size={15} /> : <Gauge size={15} />}</span>
+        <div className="speed-idle-text">
+          <strong>{t("speed.idle")}</strong>
+          <span>{queued > 0 ? t("speed.queued", { n: queued }) : t("speed.none")}</span>
+        </div>
+      </div>
+    );
+  }
+  // Everything is done when the slowest download is; that needs every size and rate.
+  const secs = running.map((i) => (i.total > 0 && rate(i.id) > 0 ? (i.total - i.completed) / rate(i.id) : NaN));
+  const left = secs.every(Number.isFinite) ? eta(Math.max(...secs), 1, t) : "";
+  const [value, unit] = bps > 0 ? speed(bps).split(" ") : ["", ""];
+  return (
+    <div className="speed-card">
+      <div className="speed-top">
+        <span className="speed-live">
+          <span className="live-dot" />
+          {t("speed.downloading", { n: running.length })}
+        </span>
+        {queued > 0 && <span className="speed-queued">{t("speed.queued", { n: queued })}</span>}
+      </div>
+      {bps > 0 ? (
+        <div className="speed-value">
+          {value}
+          <span className="speed-unit">{unit}</span>
+        </div>
+      ) : (
+        <div className="speed-value connecting">{t("speed.connecting")}</div>
+      )}
+      <Sparkline values={history} />
+      {left && <div className="speed-eta">{t("row.left", { t: left })}</div>}
     </div>
   );
 }
