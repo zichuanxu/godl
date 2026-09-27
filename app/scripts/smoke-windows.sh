@@ -46,7 +46,10 @@ dest="$(cygpath -w "$USERPROFILE/Downloads/godl-smoke-$$.bin")"
 for _ in $(seq 1 60); do [ -f "$dest" ] && break; sleep 1; done
 got="$(sha256sum "$dest" | cut -d' ' -f1)"
 [ "$got" = "$want" ] || { echo "checksum mismatch"; exit 1; }
-powershell -NoProfile -Command "Get-Content -Path '$dest' -Stream Zone.Identifier" | grep -q ZoneId=3
+# The Zone.Identifier stream is written right after the file appears.
+motw() { powershell -NoProfile -Command "Get-Content -Path '$dest' -Stream Zone.Identifier" 2>/dev/null | grep -q ZoneId=3; }
+for _ in $(seq 1 10); do motw && break; sleep 1; done
+motw
 rm -f "$dest"
 
 echo "== uninstall"

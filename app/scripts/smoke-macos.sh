@@ -52,6 +52,8 @@ for _ in $(seq 1 60); do
 done
 got="$(shasum -a 256 "$dest" | cut -d' ' -f1)"
 [ "$got" = "$want" ] || { echo "checksum mismatch"; exit 1; }
+# The attribute is set right after the file appears.
+for _ in $(seq 1 10); do xattr -p com.apple.quarantine "$dest" >/dev/null 2>&1 && break; sleep 1; done
 xattr -p com.apple.quarantine "$dest" >/dev/null
 rm -f "$dest"
 echo "install-to-download OK"

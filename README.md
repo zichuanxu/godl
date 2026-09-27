@@ -20,8 +20,8 @@ The roadmap and design contract live in [DESIGN.md](DESIGN.md).
 | | |
 | --- | --- |
 | macOS app | `brew install --cask zichuanxu/tap/godl-desktop`, or the `.dmg` from [Releases](https://github.com/zichuanxu/godl/releases/latest) |
-| Windows app | `winget install zichuanxu.godl`, `scoop install godl-desktop` (bucket `zichuanxu/scoop-bucket`), or the installer from Releases |
-| CLI (macOS, Linux, Windows) | `brew install zichuanxu/tap/godl`, `scoop install godl`, or an archive from Releases |
+| Windows app | `winget install zichuanxu.godl`, `scoop install zichuanxu/godl-desktop` (after `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket`), or the installer from Releases |
+| CLI (macOS, Linux, Windows) | `brew install zichuanxu/tap/godl`, `scoop install zichuanxu/godl`, or an archive from Releases |
 
 The builds are unsigned, so the first launch needs one confirmation: [docs/install.md](docs/install.md) has the steps for Gatekeeper and SmartScreen.
 

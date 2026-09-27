@@ -42,6 +42,10 @@ changelog:
   sort: asc
 
 release:
+  # Published by the release workflow once the desktop packages exist and
+  # pass the install-to-download tests, so releases/latest never points at
+  # a release without installers.
+  draft: true
   prerelease: auto
   footer: |
     ## Install
@@ -49,7 +53,7 @@ release:
     | | |
     | --- | --- |
     | macOS app | `godl-desktop_{{ .Version }}_macos_universal.dmg`, or `brew install --cask zichuanxu/tap/godl-desktop` |
-    | Windows app | `godl-desktop_{{ .Version }}_windows_amd64_setup.exe`, `winget install zichuanxu.godl`, or `scoop install godl-desktop` from `zichuanxu/scoop-bucket` |
-    | CLI and service | the `godl_{{ .Version }}_*` archives, `brew install zichuanxu/tap/godl`, or `scoop install godl` |
+    | Windows app | `godl-desktop_{{ .Version }}_windows_amd64_setup.exe`, `winget install zichuanxu.godl` (once winget has accepted the version), or `scoop install zichuanxu/godl-desktop` after `scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket` |
+    | CLI and service | the `godl_{{ .Version }}_*` archives, `brew install zichuanxu/tap/godl`, or `scoop install zichuanxu/godl` after adding the bucket |
 
     The builds are not signed. See [docs/install.md](https://github.com/zichuanxu/godl/blob/main/docs/install.md) for the one-time Gatekeeper and SmartScreen steps. Desktop checksums are in `desktop-checksums.txt`.

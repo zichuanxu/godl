@@ -46,8 +46,10 @@ winget install zichuanxu.godl
 
 ```powershell
 scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket
-scoop install godl-desktop
+scoop install zichuanxu/godl-desktop
 ```
+
+winget lists a version only after Microsoft's review of its manifest merges, which can take a few days after the release; the installer on the release page is available at once.
 
 or download `godl-desktop_<version>_windows_amd64_setup.exe` (installer, no administrator rights needed) or `..._windows_amd64.zip` (portable).
 
@@ -58,7 +60,8 @@ The installer puts godl in `%LocalAppData%\Programs\godl` and adds it to the Sta
 ### CLI
 
 ```powershell
-scoop install godl
+scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket
+scoop install zichuanxu/godl
 ```
 
 or unpack `godl_<version>_windows_amd64.zip` and put `godl.exe` on your `PATH`. Do not run `godl service` while the desktop app is open: both use the same port.
@@ -85,7 +88,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 
 ## Updates
 
-The desktop app checks GitHub once a week and shows a banner when a newer version exists (turn this off in **Settings → Desktop**). It never downloads or installs anything by itself: update with the same method you installed with (`brew upgrade`, `winget upgrade`, `scoop update`, or a new download).
+The desktop app checks GitHub once a week and shows a banner when a newer version exists (turn this off in **Settings → Desktop**). The check goes through the proxy configured in godl. It never downloads or installs anything by itself: update with the same method you installed with (`brew upgrade`, `winget upgrade`, `scoop update`, or a new download).
 
 ## Uninstalling
 

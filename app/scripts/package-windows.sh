@@ -12,8 +12,11 @@ mkdir -p "$out"
 work="$(mktemp -d)"
 trap 'rm -rf "$work" wails_windows_amd64.syso' EXIT
 
+# Windows version fields are numeric only: 1.0.0-rc.1 becomes 1.0.0.
+numeric="${version%%-*}"
+
 # Version resource, icon, and manifest (DPI awareness, common controls v6).
-sed -e "s/0\.0\.0/${version}/g" build/windows/info.json > "$work/info.json"
+sed -e "s/\"file_version\": \"0\.0\.0\"/\"file_version\": \"${numeric}\"/" -e "s/0\.0\.0/${version}/g" build/windows/info.json > "$work/info.json"
 wails3 generate syso -arch amd64 -icon build/windows/icon.ico \
   -manifest build/windows/wails.exe.manifest -info "$work/info.json" -out wails_windows_amd64.syso
 
@@ -26,8 +29,12 @@ cp "$work/godl.exe" ../LICENSE ../NOTICE "$work/portable/"
 (cd "$work/portable" && 7z a -tzip -bso0 "$work/$name.zip" .)
 cp "$work/$name.zip" "$out/"
 
-makensis -V2 -DVERSION="${version}" -DBINARY="$(cygpath -w "$work/godl.exe")" \
-  -DLICENSE="$(cygpath -w ../LICENSE)" -DICON="$(cygpath -w build/windows/icon.ico)" \
+# makensis resolves relative paths against the script's directory, so every
+# path it gets is absolute.
+here="$(pwd)"
+mkdir -p "$out" && out="$(cd "$out" && pwd)"
+makensis -V2 -DVERSION="${version}" -DNUMVERSION="${numeric}" -DBINARY="$(cygpath -w "$work/godl.exe")" \
+  -DLICENSE="$(cygpath -w "$here/../LICENSE")" -DICON="$(cygpath -w "$here/build/windows/icon.ico")" \
   -DOUTFILE="$(cygpath -w "$out/godl-desktop_${version}_windows_amd64_setup.exe")" \
-  build/windows/installer.nsi
+  "$(cygpath -w "$here/build/windows/installer.nsi")"
 ls -l "$out"

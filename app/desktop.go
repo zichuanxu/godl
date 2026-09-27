@@ -20,6 +20,7 @@ import (
 	"github.com/zichuanxu/godl/internal/download"
 	"github.com/zichuanxu/godl/internal/logging"
 	"github.com/zichuanxu/godl/internal/manager"
+	"github.com/zichuanxu/godl/internal/netproxy"
 	"github.com/zichuanxu/godl/internal/service"
 	"github.com/zichuanxu/godl/internal/settings"
 	"github.com/zichuanxu/godl/internal/update"
@@ -143,7 +144,9 @@ func (d *Desktop) State() State {
 	if d.app != nil {
 		s.Autostart, _ = d.app.Autostart.IsEnabled()
 	}
-	s.Update = d.newer.Load()
+	if d.mgr != nil && d.mgr.Settings().Desktop.CheckUpdates {
+		s.Update = d.newer.Load()
+	}
 	return s
 }
 
@@ -465,7 +468,13 @@ func (d *Desktop) watchReleases(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	// The check goes through the proxy configured in godl, like downloads.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = netproxy.Func(func() netproxy.Config { return d.mgr.Settings().Proxy })
+	checker := &update.Checker{
+		Client: &http.Client{Transport: transport, Timeout: 20 * time.Second},
+		URL:    update.LatestURL, Path: update.StatePath(dir),
+	}
 	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 	for {
@@ -478,9 +487,9 @@ func (d *Desktop) watchReleases(ctx context.Context) {
 		if !d.mgr.Settings().Desktop.CheckUpdates {
 			continue
 		}
-		rel, ok, err := update.Check(ctx, client, update.LatestURL, update.StatePath(dir), version, time.Now())
+		rel, ok, err := checker.Check(ctx, version, time.Now())
 		if err != nil {
-			d.log.Info("update check", "err", err)
+			d.log.Warn("update check", "err", err)
 			continue
 		}
 		if ok {

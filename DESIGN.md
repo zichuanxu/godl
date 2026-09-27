@@ -480,8 +480,11 @@ Package names: Homebrew formula `godl` (CLI) and cask `godl-desktop` in
 `zichuanxu/homebrew-tap`; Scoop `godl` and `godl-desktop` in `zichuanxu/scoop-bucket`;
 winget `zichuanxu.godl` (the per-user NSIS installer). `tools/packaging` renders all of
 them from the release checksums; the release workflow pushes the tap and bucket when a
-`TAP_TOKEN` secret exists and attaches the manifests to the release either way. The
-release workflow also installs the dmg and the installer on clean GitHub runners,
+`TAP_TOKEN` secret exists and attaches the manifests to the release either way; with a
+`WINGET_TOKEN` secret it opens the winget-pkgs pull request for each version after the
+first, which is submitted by hand. Releases start as drafts and are published only after
+the install checks pass, so the update banner never points at a release without
+installers. The release workflow also installs the dmg and the installer on clean GitHub runners,
 launches the app, and downloads a file through it (the M6 install-to-download check).
 
 docs/install.md documents the Gatekeeper workaround (allow in System Settings, or

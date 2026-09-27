@@ -23,7 +23,11 @@ app="$work/godl.app/Contents"
 mkdir -p "$app/MacOS" "$app/Resources"
 lipo -create -output "$app/MacOS/godl" "$work/godl-arm64" "$work/godl-amd64"
 cp build/darwin/icons.icns "$app/Resources/icons.icns"
-sed -e "s/<string>0.0.0<\/string>/<string>${version}<\/string>/g" build/darwin/Info.plist > "$app/Info.plist"
+# CFBundleVersion is numeric (1.0.0-rc.1 becomes 1.0.0); the short version
+# string shows the full release name.
+plutil -convert xml1 -o "$app/Info.plist" build/darwin/Info.plist
+plutil -replace CFBundleVersion -string "${version%%-*}" "$app/Info.plist"
+plutil -replace CFBundleShortVersionString -string "$version" "$app/Info.plist"
 codesign --force --deep --sign - "$work/godl.app"
 codesign --verify --deep "$work/godl.app"
 

@@ -1,7 +1,7 @@
 ; Per-user installer for the godl desktop app: no administrator rights, an
 ; entry in Apps & features, and Start menu shortcuts. Built by
-; scripts/package-windows.sh, which defines VERSION, BINARY, LICENSE, ICON,
-; and OUTFILE.
+; scripts/package-windows.sh, which defines VERSION, NUMVERSION (digits
+; only), BINARY, LICENSE, ICON, and OUTFILE.
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -15,10 +15,10 @@ InstallDir "$LOCALAPPDATA\Programs\godl"
 InstallDirRegKey HKCU "Software\godl" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${NUMVERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
-VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "FileVersion" "${NUMVERSION}"
 VIAddVersionKey "FileDescription" "godl installer"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 zichuanxu. Apache-2.0."
 
@@ -81,4 +81,6 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "Software\godl"
+  ; "Start godl when I log in" (Wails autostart) registers this value.
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "godl"
 SectionEnd

@@ -147,22 +147,33 @@ func StatePath(dir string) string { return filepath.Join(dir, "update.json") }
 
 var errDev = errors.New("development builds do not check for updates")
 
-// Check returns a newer release than current, polling url only when the
-// state at path says a check is due; ok is false when there is none.
-func Check(ctx context.Context, client *http.Client, url, path, current string, now time.Time) (Release, bool, error) {
+// Checker polls url at most once per Interval, remembering the last check in
+// the state file at Path and in memory, so an unwritable file cannot turn
+// the weekly check into a frequent one.
+type Checker struct {
+	Client *http.Client
+	URL    string
+	Path   string
+	last   State
+}
+
+// Check returns the newest release and whether it is newer than current.
+func (c *Checker) Check(ctx context.Context, current string, now time.Time) (Release, bool, error) {
 	if _, ok := parse(current); !ok {
 		return Release{}, false, errDev
 	}
-	s := LoadState(path)
+	s := LoadState(c.Path)
+	if c.last.CheckedAt.After(s.CheckedAt) {
+		s = c.last
+	}
 	if s.Due(now) {
-		latest, err := Latest(ctx, client, url)
+		latest, err := Latest(ctx, c.Client, c.URL)
 		if err != nil {
 			return Release{}, false, err
 		}
 		s = State{CheckedAt: now, Latest: latest}
-		if err := SaveState(path, s); err != nil {
-			return Release{}, false, err
-		}
+		c.last = s
+		_ = SaveState(c.Path, s) // the in-memory copy still throttles
 	}
 	return s.Latest, Newer(s.Latest.Version, current), nil
 }
