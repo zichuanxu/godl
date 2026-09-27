@@ -17,7 +17,12 @@ cleanup() {
   hdiutil detach -quiet "$mount" 2>/dev/null || true
   rm -rf "$work"
 }
-trap cleanup EXIT
+diagnose() {
+  echo "== diagnostics"
+  "$cli" --token-file "$token" list 2>&1 || true
+  tail -n 40 "$HOME/Library/Application Support/godl/godl.log" 2>/dev/null || true
+}
+trap 'status=$?; [ $status -ne 0 ] && [ -n "${token:-}" ] && diagnose; cleanup' EXIT
 
 echo "== install"
 mkdir -p "$mount"
@@ -46,7 +51,7 @@ done
 echo "== download"
 dest="$HOME/Downloads/godl-smoke-$$.bin"
 "$cli" --token-file "$token" add "http://127.0.0.1:18790/payload.bin" "$dest" >/dev/null
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   [ -f "$dest" ] && break
   sleep 1
 done

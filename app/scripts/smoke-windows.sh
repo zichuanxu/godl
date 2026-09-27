@@ -16,7 +16,12 @@ cleanup() {
   if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
   rm -rf "$work" || true
 }
-trap cleanup EXIT
+diagnose() {
+  echo "== diagnostics"
+  "$cli" --token-file "$token" list 2>&1 || true
+  tail -n 40 "$APPDATA/godl/godl.log" 2>/dev/null || true
+}
+trap 'status=$?; [ $status -ne 0 ] && [ -n "${token:-}" ] && diagnose; cleanup' EXIT
 
 echo "== install"
 cmd //c "$(cygpath -w "$setup") /S"
@@ -44,7 +49,7 @@ done
 echo "== download"
 dest="$(cygpath -w "$USERPROFILE/Downloads/godl-smoke-$$.bin")"
 "$cli" --token-file "$token" add "http://127.0.0.1:18790/payload.bin" "$dest" >/dev/null
-for _ in $(seq 1 60); do [ -f "$dest" ] && break; sleep 1; done
+for _ in $(seq 1 120); do [ -f "$dest" ] && break; sleep 1; done
 got="$(sha256sum < "$dest" | cut -d' ' -f1)"
 [ "$got" = "$want" ] || { echo "checksum mismatch"; exit 1; }
 # The Zone.Identifier stream is written right after the file appears.

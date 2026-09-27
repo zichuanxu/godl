@@ -1,0 +1,49 @@
+name: Install check
+
+# Re-runs the install-to-download check against any release, including a
+# draft, with the scripts from the chosen branch.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release tag, for example v1.0.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          v="${TAG#v}"
+          gh release download "$TAG" -p "godl-desktop_${v}_windows_amd64_setup.exe" -p "godl_${v}_windows_amd64.zip" -D assets
+          unzip -o "assets/godl_${v}_windows_amd64.zip" godl.exe -d assets
+
+      - run: app/scripts/smoke-windows.sh assets/godl-desktop_*_setup.exe assets/godl.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          v="${TAG#v}"
+          gh release download "$TAG" -p "godl-desktop_${v}_macos_universal.dmg" -p "godl_${v}_darwin_arm64.tar.gz" -D assets
+          tar -xzf "assets/godl_${v}_darwin_arm64.tar.gz" -C assets godl
+
+      - run: app/scripts/smoke-macos.sh assets/godl-desktop_*_macos_universal.dmg assets/godl
