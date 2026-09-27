@@ -21,12 +21,10 @@ import {
   Inbox,
   KeyRound,
   Layers,
-  Moon,
   Package,
   Pause,
   Play,
   Plus,
-  Power,
   RotateCw,
   Search,
   Settings as SettingsIcon,
@@ -121,7 +119,6 @@ function Shell() {
   const [clip, setClip] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [history, setHistory] = useState<number[]>(() => Array(60).fill(0));
-  const [whenDone, setWhenDone] = useState("");
   const [canConvert, setCanConvert] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<{ action: string; left: number } | null>(null);
@@ -153,7 +150,6 @@ function Shell() {
 
   useEffect(() => {
     Desktop.State().then(setState).catch(fail);
-    Desktop.WhenDone().then(setWhenDone).catch(() => {});
     Desktop.CanConvert().then(setCanConvert).catch(() => {});
     reload();
     const offDownload = Events.On("download", (ev) => {
@@ -213,7 +209,6 @@ function Shell() {
     if (!countdown) return;
     if (countdown.left <= 0) {
       setCountdown(null);
-      setWhenDone("");
       Desktop.PerformWhenDone(countdown.action).catch(fail);
       return;
     }
@@ -226,14 +221,6 @@ function Shell() {
     const timer = window.setTimeout(() => setToast(null), toast.kind === "error" ? 8000 : 3500);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  const chooseWhenDone = (action: string) => {
-    setWhenDone(action);
-    Desktop.SetWhenDone(action).catch((err) => {
-      setWhenDone("");
-      fail(err);
-    });
-  };
 
   const importQueue = async () => {
     try {
@@ -406,25 +393,12 @@ function Shell() {
             )}
           </div>
           <div className="tools no-drag">
-            <button className="icon" title={t("header.resumeAll")} aria-label={t("header.resumeAll")} onClick={run(() => Desktop.ResumeAll())}>
+            <button className="icon" title={t("header.resumeAll")} aria-label={t("header.resumeAll")} disabled={!state || !!state.error || counts.paused === 0} onClick={run(() => Desktop.ResumeAll())}>
               <Play size={16} />
             </button>
-            <button className="icon" title={t("header.pauseAll")} aria-label={t("header.pauseAll")} onClick={run(() => Desktop.PauseAll())}>
+            <button className="icon" title={t("header.pauseAll")} aria-label={t("header.pauseAll")} disabled={!state || !!state.error || counts.active === 0} onClick={run(() => Desktop.PauseAll())}>
               <Pause size={16} />
             </button>
-            <Menu
-              trigger={(open) => (
-                <button className={`icon ${whenDone ? "armed" : ""} ${open ? "pressed" : ""}`} title={t("header.whenDone")} aria-label={t("header.whenDone")}>
-                  {whenDone === "shutdown" ? <Power size={16} /> : <Moon size={16} />}
-                  {whenDone && <span className="armed-label">{whenDone === "shutdown" ? t("whenDone.armedShutdown") : t("whenDone.armedSleep")}</span>}
-                </button>
-              )}
-              entries={[
-                { label: t("whenDone.nothing"), checked: whenDone === "", onSelect: () => chooseWhenDone("") },
-                { icon: Moon, label: t("whenDone.sleep"), checked: whenDone === "sleep", onSelect: () => chooseWhenDone("sleep") },
-                { icon: Power, label: t("whenDone.shutdown"), checked: whenDone === "shutdown", onSelect: () => chooseWhenDone("shutdown") },
-              ]}
-            />
             <Menu
               trigger={(open) => (
                 <button className={`icon ${open ? "pressed" : ""}`} title={t("header.more")} aria-label={t("header.more")}>
@@ -546,7 +520,7 @@ function Shell() {
           left={countdown.left}
           onCancel={() => {
             setCountdown(null);
-            chooseWhenDone("");
+            Desktop.SetWhenDone("").catch(fail);
           }}
         />
       )}

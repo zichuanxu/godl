@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="NimGet">
+  <rect x="52" y="52" width="920" height="920" rx="200" fill="#536AF0"/>
+  <g transform="rotate(13 560 530)">
+    <path d="M172 338h188M204 455h132" fill="none" stroke="#F7F8FF" stroke-width="76" stroke-linecap="round"/>
+    <path d="M454 236h286l138 138v402q0 66-66 66H454q-66 0-66-66V302q0-66 66-66Z" fill="#F7F8FF"/>
+    <path d="M740 236v75q0 63 63 63h75Z" fill="#263878"/>
+  </g>
+</svg>

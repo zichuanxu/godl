@@ -15,6 +15,7 @@ from a clean data directory (`~/Library/Application Support/nimget` or
 - [ ] On macOS the sidebar is translucent and the window can be dragged by the header and the sidebar top; buttons and the search box there still respond to clicks.
 - [ ] Settings → General → Language: English and 简体中文 switch every label, the tray menu, and notifications; "System" follows the OS language.
 - [ ] Settings → General → Appearance: System, Light, and Dark apply at once and survive a restart.
+- [ ] NimGet's icon is legible beside the sidebar title in both Light and Dark appearances.
 
 ## Adding downloads
 
@@ -33,6 +34,7 @@ from a clean data directory (`~/Library/Application Support/nimget` or
 - [ ] Hovering a row shows its quick actions; right-click and the ⋯ button open the same actions menu.
 - [ ] Keyboard: ⌘/Ctrl+N new download, ⌘/Ctrl+, settings, ⌘/Ctrl+F search, arrows select, Space pauses or resumes, Enter opens, Delete asks to delete, Esc closes dialogs.
 - [ ] Pause, Resume, Retry, and Delete (with and without "also delete the file") behave as labelled.
+- [ ] The top Resume all button is disabled without paused downloads; Pause all is disabled without queued or running downloads. In a mixed queue, both are available.
 - [ ] Open launches a completed file; Show in folder reveals it in Finder or Explorer.
 - [ ] A download that fails with 401 or 403 offers Re-authenticate; pasting a fresh cURL command retries it.
 - [ ] A high-priority download starts before normal ones when the queue is full.
@@ -52,8 +54,8 @@ from a clean data directory (`~/Library/Application Support/nimget` or
 
 - [ ] Add `https://…/img[001-005].jpg`: the dialog shows "Batch pattern: 5 URLs" and queues five downloads.
 - [ ] Export writes a JSON file without cookies; Import of that file, and of a text file of URLs, queues them again.
-- [ ] "When done: Sleep" with a short download: a 30 s countdown appears when the queue empties; Cancel stops it; letting it run puts the computer to sleep once, and the choice resets to Nothing.
-- [ ] "When done: Shut down" shows the same countdown (cancel it, or test on a VM).
+- [ ] Settings → Downloads → "When the queue finishes: Sleep" with a short download: a 30 s countdown appears when the queue empties; Cancel stops it; letting it run puts the computer to sleep once, and the choice resets to Nothing.
+- [ ] Settings → Downloads → "When the queue finishes: Shut down" shows the same countdown (cancel it, or test on a VM).
 - [ ] "Open files when they finish" opens each completed file.
 
 ## HLS (M5)

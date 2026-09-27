@@ -39,12 +39,16 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
   const [sites, setSites] = useState("[]");
   const [autostart, setAutostart] = useState(state.autostart);
   const [theme, setTheme] = useState<Theme>(loadTheme);
+  const [whenDone, setWhenDone] = useState("");
+  const [initialWhenDone, setInitialWhenDone] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Desktop.Settings()
-      .then((loaded) => {
+    Promise.all([Desktop.Settings(), Desktop.WhenDone()])
+      .then(([loaded, action]) => {
         setS(loaded);
+        setWhenDone(action);
+        setInitialWhenDone(action);
         setLimit(speedText(loaded.speedLimit));
         setRules((loaded.schedule.speedRules ?? []).map((r) => ({ from: r.from, to: r.to, limit: speedText(r.limit) })));
         setSites(JSON.stringify(loaded.sites ?? [], null, 2));
@@ -63,6 +67,7 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
         sites: JSON.parse(sites),
       });
       const saved = await Desktop.SaveSettings(next);
+      if (whenDone !== initialWhenDone) await Desktop.SetWhenDone(whenDone);
       if (autostart !== state.autostart) await Desktop.SetAutostart(autostart);
       saveTheme(theme);
       applyTheme(theme);
@@ -167,6 +172,13 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
                 <Switch checked={s.desktop.askDirectory} onChange={(v) => desk({ askDirectory: v })} label={t("settings.askDirectory")} />
                 <Switch checked={s.desktop.openWhenDone} onChange={(v) => desk({ openWhenDone: v })} label={t("settings.openWhenDone")} />
               </div>
+              <Row label={t("settings.whenDone")} hint={t("settings.whenDoneHint")}>
+                <select aria-label={t("settings.whenDone")} value={whenDone} onChange={(e) => setWhenDone(e.target.value)}>
+                  <option value="">{t("whenDone.nothing")}</option>
+                  <option value="sleep">{t("whenDone.sleep")}</option>
+                  <option value="shutdown">{t("whenDone.shutdown")}</option>
+                </select>
+              </Row>
             </>
           )}
 
