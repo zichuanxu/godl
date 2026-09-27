@@ -60,7 +60,11 @@ func New(cfg Config) (*Service, error) {
 		cfg.Address = "127.0.0.1:51000"
 	}
 	if cfg.DatabasePath == "" {
-		return nil, errors.New("database path is required")
+		path, err := DefaultDatabasePath()
+		if err != nil {
+			return nil, err
+		}
+		cfg.DatabasePath = path
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)

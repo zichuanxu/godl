@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -37,7 +38,7 @@ type Sealer struct {
 // Open loads the key from the OS keyring, creating it on first use, and falls
 // back to an in-memory key when no keyring is available.
 func Open() (*Sealer, error) {
-	key, keyringErr := keyFromKeyring()
+	key, keyringErr := keyWithTimeout(keyringTimeout)
 	if keyringErr != nil {
 		key = make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {
@@ -52,6 +53,30 @@ func Open() (*Sealer, error) {
 		s.KeyringErr = fmt.Errorf("OS keyring unavailable, stored credentials will not survive a restart: %w", keyringErr)
 	}
 	return s, nil
+}
+
+// keyringTimeout bounds a keyring that never answers, such as a macOS
+// keychain waiting on a dialog nobody sees.
+const keyringTimeout = 15 * time.Second
+
+// keyWithTimeout reads the key, giving up after d.
+// ponytail: a timed-out keyring call keeps running in the background.
+func keyWithTimeout(d time.Duration) ([]byte, error) {
+	type result struct {
+		key []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		key, err := keyFromKeyring()
+		done <- result{key, err}
+	}()
+	select {
+	case r := <-done:
+		return r.key, r.err
+	case <-time.After(d):
+		return nil, fmt.Errorf("keyring did not answer within %v", d)
+	}
 }
 
 func keyFromKeyring() ([]byte, error) {

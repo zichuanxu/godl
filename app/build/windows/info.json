@@ -1,0 +1,14 @@
+{
+	"fixed": {
+		"file_version": "0.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.0.0",
+			"CompanyName": "godl",
+			"FileDescription": "godl download manager",
+			"LegalCopyright": "Copyright 2026 zichuanxu. Apache-2.0.",
+			"ProductName": "godl"
+		}
+	}
+}

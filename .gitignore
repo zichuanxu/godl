@@ -2,6 +2,7 @@
 node_modules/
 dist/
 build/
+!app/build/
 coverage.out
 *.log
 .env
@@ -12,3 +13,4 @@ app/frontend/node_modules/
 .omc/
 .serena/
 .DS_Store
+app/bin/

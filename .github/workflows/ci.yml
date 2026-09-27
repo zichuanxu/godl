@@ -76,6 +76,51 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -o "/tmp/${out}" ./cmd/godl
           done
 
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: build frontend
+        working-directory: app/frontend
+        run: npm ci && npm run build
+
+      - name: bindings are up to date
+        if: runner.os == 'macOS'
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
+          wails3 generate bindings -clean=true -ts -f '-tags production'
+          git diff --exit-code -- frontend/bindings
+
+      - run: go vet -tags production .
+
+      - name: build desktop app
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            CGO_ENABLED=0 go build -tags production -ldflags "-H windowsgui" -o bin/godl.exe .
+          else
+            go build -tags production -o bin/godl .
+          fi
+
   benchmark:
     runs-on: ubuntu-latest
     steps:

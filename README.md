@@ -9,12 +9,14 @@ The engine splits a download across up to 32 HTTP/1.1 connections and rebalances
 
 The service queue orders downloads by priority, shares a per-host connection cap across downloads, applies global and per-download speed limits (including time-of-day rules and a queue window), names files from the server, and connects through a manual or the system proxy.
 
-The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M2 (manager and network)**; the desktop GUI (M3) is not shipped yet.
+The desktop app (macOS and Windows) runs the same service in-process, with a tray icon, notifications, drag and drop, cURL import, and a clipboard monitor.
+
+The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M3 (desktop GUI)**; installers arrive with v1.0 (M6).
 
 ## Requirements
 
 - Go 1.25 or newer.
-- Node.js and npm only for the optional React frontend under `app/frontend`.
+- For the desktop app: Node.js 22 and npm; on macOS the Xcode command line tools (cgo).
 
 ## Build and test
 
@@ -33,6 +35,25 @@ The performance gate compares godl with `aria2c -x16 -s16` on a local server tha
 go build -o godl ./cmd/godl
 go run ./tools/bench -godl ./godl -gate
 ```
+
+## Desktop app
+
+The desktop app lives in `app/` as its own Go module, so the CLI never depends on Wails (v3, pinned to `v3.0.0-beta.26`).
+
+```bash
+cd app/frontend && npm ci && npm run build && cd ..
+go build -tags production -o bin/godl .                                     # macOS (cgo)
+GOOS=windows CGO_ENABLED=0 go build -tags production -ldflags "-H windowsgui" -o bin/godl.exe .
+```
+
+After changing a bound Go type or method, regenerate the TypeScript bindings (CI checks they are current):
+
+```bash
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
+cd app && wails3 generate bindings -clean=true -ts -f '-tags production'
+```
+
+The app embeds the download service and still serves the loopback API, so the CLI commands below work while it runs; a separate `godl service` must not be running at the same time. Closing the window keeps downloads going in the tray; Quit stops them after they checkpoint. Logs go to `godl.log` in the data directory. [docs/desktop-checklist.md](docs/desktop-checklist.md) is the manual test list.
 
 ## Direct downloader
 
@@ -189,8 +210,6 @@ A client that falls behind is disconnected and should reconnect for a fresh snap
 - Destinations must resolve, after following symlinks, inside a `--download-root`, and never inside known autostart directories.
 - Logs never contain request headers, and URLs are logged with credentials and signature parameters redacted. Do not share the token file.
 
-The React queue table in `app/frontend` predates these rules and cannot talk to the secured API from a browser; the M3 desktop shell replaces it with in-process bindings.
-
 ## Repository layout
 
 ```text
@@ -204,11 +223,13 @@ internal/manager/     Queue, priorities, host caps, limits, schedule, naming, co
 internal/settings/    Settings document and schedule rules
 internal/netproxy/    Manual and system proxy selection
 internal/hls/         HLS playlists, AES-128, and segment concatenation (wired in M5)
+internal/secrets/     AES-GCM sealing with a key in the OS keyring
+internal/curlimport/  "Copy as cURL" parser
 internal/api/         Authenticated loopback JSON and SSE API
 internal/client/      Service client
 internal/service/     Service composition, lifecycle, paths, and token
 tools/bench/          Performance gate against aria2c
-app/                  Desktop shell placeholder and React frontend
+app/                  Desktop app (Wails v3 module): bindings, tray, React frontend
 DESIGN.md             Design contract and M0–M6 roadmap
 ```
 
