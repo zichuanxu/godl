@@ -38,6 +38,8 @@ head -c 5000000 /dev/urandom > "$work/www/payload.bin"
 want="$(shasum -a 256 "$work/www/payload.bin" | cut -d' ' -f1)"
 (cd "$work/www" && exec python3 -m http.server 18790 --bind 127.0.0.1 >/dev/null 2>&1) &
 server=$!
+for _ in $(seq 1 30); do curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null 2>&1 && break; sleep 1; done
+curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 
 echo "== launch"
 "$appdir/godl.app/Contents/MacOS/godl" >"$work/app.log" 2>&1 &
