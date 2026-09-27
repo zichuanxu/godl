@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/settings"
 )
 
 type Client struct {
@@ -35,16 +36,28 @@ func (c *Client) List(ctx context.Context) ([]download.Item, error) {
 	return items, nil
 }
 
-func (c *Client) Add(ctx context.Context, rawURL, destination string) (download.Item, error) {
+func (c *Client) Add(ctx context.Context, req download.Request) (download.Item, error) {
 	var item download.Item
-	input := struct {
-		URL         string `json:"url"`
-		Destination string `json:"destination"`
-	}{URL: rawURL, Destination: destination}
-	if err := c.do(ctx, http.MethodPost, "/v1/downloads", input, http.StatusAccepted, &item); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/downloads", req, http.StatusAccepted, &item); err != nil {
 		return download.Item{}, err
 	}
 	return item, nil
+}
+
+func (c *Client) Update(ctx context.Context, id string, patch download.Patch) error {
+	return c.do(ctx, http.MethodPatch, "/v1/downloads/"+url.PathEscape(id), patch, http.StatusNoContent, nil)
+}
+
+func (c *Client) Settings(ctx context.Context) (settings.Settings, error) {
+	var s settings.Settings
+	err := c.do(ctx, http.MethodGet, "/v1/settings", nil, http.StatusOK, &s)
+	return s, err
+}
+
+func (c *Client) PutSettings(ctx context.Context, s settings.Settings) (settings.Settings, error) {
+	var saved settings.Settings
+	err := c.do(ctx, http.MethodPut, "/v1/settings", s, http.StatusOK, &saved)
+	return saved, err
 }
 
 func (c *Client) Pause(ctx context.Context, id string) error {

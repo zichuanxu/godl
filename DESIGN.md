@@ -58,7 +58,9 @@ no Windows service).
 internal/engine/   engine.go scheduler.go ranged.go single.go checkpoint.go checksum.go
                    retry.go transport.go prealloc_*.go diskfree_*.go runner.go
 internal/hls/      playlist.go decrypt.go concat.go
-internal/manager/  queue.go scheduler.go limiter.go filename.go
+internal/manager/  manager.go filename.go destination.go
+internal/settings/ settings.go (settings document, schedule rules)
+internal/netproxy/ manual and system proxy
 internal/store/    sqlite.go crypto.go migrations/
 internal/api/      http.go sse.go auth.go
 internal/service/  composition and lifecycle, shared by both hosts
@@ -300,8 +302,10 @@ Then **hard sanitization** — the filename is attacker-controlled input:
 
 Category routing by extension (Video / Music / Documents / Compressed / Programs)
 under a configurable root, overridable per download, with an "always ask" toggle.
-Collisions resolve to `name (1).ext` through an `O_EXCL` create loop so two concurrent
-downloads cannot both win.
+Collisions resolve to `name (1).ext`: a name is free when no file, `.part` file, or
+queued download uses it. The manager lock serializes adds, so two downloads cannot
+both win, and the engine's link-based commit (3.5) fails instead of overwriting a
+file another process created meanwhile.
 
 ---
 

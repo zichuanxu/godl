@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"log/slog"
@@ -19,9 +20,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zichuanxu/godl/internal/client"
+	"github.com/zichuanxu/godl/internal/download"
 	"github.com/zichuanxu/godl/internal/engine"
 	"github.com/zichuanxu/godl/internal/logging"
+	"github.com/zichuanxu/godl/internal/netproxy"
 	"github.com/zichuanxu/godl/internal/service"
+	"github.com/zichuanxu/godl/internal/settings"
+	"golang.org/x/time/rate"
 )
 
 type headerFlags []string
@@ -35,6 +40,20 @@ func (h *headerFlags) Set(value string) error {
 	}
 	*h = append(*h, value)
 	return nil
+}
+
+// values returns the headers by canonical name.
+func (h headerFlags) values() (map[string]string, error) {
+	out := make(map[string]string, len(h))
+	for _, raw := range h {
+		name, value, _ := strings.Cut(raw, ":")
+		name, value = http.CanonicalHeaderKey(strings.TrimSpace(name)), strings.TrimSpace(value)
+		if err := settings.ValidateHeader(name, value); err != nil {
+			return nil, err
+		}
+		out[name] = value
+	}
+	return out, nil
 }
 
 // Set at link time by goreleaser: -X main.version=... -X main.commit=... -X main.date=...
@@ -62,7 +81,9 @@ func main() {
 		newIDCommand(cfg, "pause", "Pause a service download", (*client.Client).Pause),
 		newIDCommand(cfg, "resume", "Resume a paused download", (*client.Client).Resume),
 		newIDCommand(cfg, "retry", "Retry a failed download", (*client.Client).Retry),
+		newSetCommand(cfg),
 		newDeleteCommand(cfg),
+		newSettingsCommand(cfg),
 		newDownloadCommand(),
 		newVersionCommand(),
 	)
@@ -85,7 +106,6 @@ func newVersionCommand() *cobra.Command {
 func newServiceCommand(cfg *cliConfig) *cobra.Command {
 	var address, database, logLevel string
 	var roots []string
-	var maxConcurrent int
 	cmd := &cobra.Command{
 		Use:   "service",
 		Short: "Run the background download service",
@@ -101,14 +121,9 @@ func newServiceCommand(cfg *cliConfig) *cobra.Command {
 					return err
 				}
 			}
-			runner, err := engine.NewRunner(engine.Config{})
-			if err != nil {
-				return err
-			}
 			svc, err := service.New(service.Config{
 				Address: address, DatabasePath: database, TokenPath: cfg.tokenFile,
-				DownloadRoots: roots, Runner: runner, MaxConcurrent: maxConcurrent,
-				Logger: logging.New(cmd.ErrOrStderr(), level),
+				DownloadRoots: roots, Logger: logging.New(cmd.ErrOrStderr(), level),
 			})
 			if err != nil {
 				return err
@@ -125,7 +140,6 @@ func newServiceCommand(cfg *cliConfig) *cobra.Command {
 	cmd.Flags().StringVar(&address, "listen", "127.0.0.1:51000", "loopback address for the service")
 	cmd.Flags().StringVar(&database, "database", "", "SQLite database path")
 	cmd.Flags().StringArrayVar(&roots, "download-root", nil, "directory downloads may be written under; repeatable (default: ~/Downloads)")
-	cmd.Flags().IntVar(&maxConcurrent, "max-concurrent", 3, "maximum active downloads")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, or error")
 	return cmd
 }
@@ -149,27 +163,176 @@ func (cfg *cliConfig) client() (*client.Client, error) {
 }
 
 func newAddCommand(cfg *cliConfig) *cobra.Command {
-	return &cobra.Command{
-		Use:   "add URL OUTPUT",
+	var dir, priority, speed, checksum string
+	var connections int
+	var headers headerFlags
+	cmd := &cobra.Command{
+		Use:   "add URL [OUTPUT]",
 		Short: "Queue a download in the service",
-		Args:  cobra.ExactArgs(2),
+		Long: "Queue a download in the service. Without OUTPUT the file name comes from the server\n" +
+			"and the file goes to --dir, or to a category folder under the download root.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cfg.client()
 			if err != nil {
 				return err
 			}
-			// The service runs in another working directory.
-			output, err := filepath.Abs(args[1])
-			if err != nil {
+			req := download.Request{URL: args[0], Connections: connections, Checksum: checksum}
+			if req.Priority, err = parsePriority(priority); err != nil {
 				return err
 			}
-			item, err := c.Add(cmd.Context(), args[0], output)
+			if req.SpeedLimit, err = parseSpeed(speed); err != nil {
+				return err
+			}
+			if req.Headers, err = headers.values(); err != nil {
+				return err
+			}
+			// The service runs in another working directory.
+			if len(args) == 2 {
+				if req.Destination, err = filepath.Abs(args[1]); err != nil {
+					return err
+				}
+			}
+			if dir != "" {
+				if req.Directory, err = filepath.Abs(dir); err != nil {
+					return err
+				}
+			}
+			item, err := c.Add(cmd.Context(), req)
 			if err != nil {
 				return err
 			}
 			return writeJSON(cmd, item)
 		},
 	}
+	cmd.Flags().StringVar(&dir, "dir", "", "directory for a server-named file")
+	cmd.Flags().StringVar(&priority, "priority", "normal", "low, normal, or high")
+	cmd.Flags().IntVar(&connections, "connections", 0, "connections, 1-32 (default: site or global setting)")
+	cmd.Flags().StringVar(&speed, "speed-limit", "0", "speed limit in bytes per second, with K, M, or G suffix; 0 for none")
+	cmd.Flags().StringVar(&checksum, "checksum", "", "expected digest as algo:hex (sha256, sha512, sha1, md5)")
+	cmd.Flags().Var(&headers, "header", "request header, such as a cookie; repeatable")
+	return cmd
+}
+
+func newSetCommand(cfg *cliConfig) *cobra.Command {
+	var priority, speed string
+	var connections int
+	cmd := &cobra.Command{
+		Use:   "set ID",
+		Short: "Change a download's priority, connections, or speed limit",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := cfg.client()
+			if err != nil {
+				return err
+			}
+			var patch download.Patch
+			if cmd.Flags().Changed("priority") {
+				p, err := parsePriority(priority)
+				if err != nil {
+					return err
+				}
+				patch.Priority = &p
+			}
+			if cmd.Flags().Changed("speed-limit") {
+				limit, err := parseSpeed(speed)
+				if err != nil {
+					return err
+				}
+				patch.SpeedLimit = &limit
+			}
+			if cmd.Flags().Changed("connections") {
+				patch.Connections = &connections
+			}
+			return c.Update(cmd.Context(), args[0], patch)
+		},
+	}
+	cmd.Flags().StringVar(&priority, "priority", "", "low, normal, or high")
+	cmd.Flags().IntVar(&connections, "connections", 0, "connections, 1-32; 0 for the default")
+	cmd.Flags().StringVar(&speed, "speed-limit", "", "speed limit in bytes per second, with K, M, or G suffix; 0 for none")
+	return cmd
+}
+
+func newSettingsCommand(cfg *cliConfig) *cobra.Command {
+	cmd := &cobra.Command{Use: "settings", Short: "Show or replace the service settings"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "get",
+		Short: "Print the settings as JSON",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := cfg.client()
+			if err != nil {
+				return err
+			}
+			s, err := c.Settings(cmd.Context())
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(s)
+		},
+	}, &cobra.Command{
+		Use:   "set FILE",
+		Short: "Replace the settings with a JSON file ('-' for standard input)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := cfg.client()
+			if err != nil {
+				return err
+			}
+			var in io.Reader = cmd.InOrStdin()
+			if args[0] != "-" {
+				f, err := os.Open(args[0])
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				in = f
+			}
+			var s settings.Settings
+			dec := json.NewDecoder(in)
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&s); err != nil {
+				return fmt.Errorf("parse settings: %w", err)
+			}
+			saved, err := c.PutSettings(cmd.Context(), s)
+			if err != nil {
+				return err
+			}
+			return writeJSON(cmd, saved)
+		},
+	})
+	return cmd
+}
+
+func parsePriority(value string) (int, error) {
+	switch strings.ToLower(value) {
+	case "low":
+		return download.PriorityLow, nil
+	case "", "normal":
+		return download.PriorityNormal, nil
+	case "high":
+		return download.PriorityHigh, nil
+	}
+	return 0, fmt.Errorf("priority must be low, normal, or high, got %q", value)
+}
+
+// parseSpeed reads bytes per second with an optional binary K, M, or G suffix.
+func parseSpeed(value string) (int64, error) {
+	value = strings.TrimSpace(strings.ToUpper(value))
+	value = strings.TrimSuffix(strings.TrimSuffix(value, "/S"), "B")
+	shift := 0
+	if n := len(value); n > 0 {
+		if i := strings.IndexByte("KMG", value[n-1]); i >= 0 {
+			shift, value = 10*(i+1), value[:n-1]
+		}
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid speed %q; use for example 500K or 2M", value)
+	}
+	return int64(n * float64(int64(1)<<shift)), nil
 }
 
 func newListCommand(cfg *cliConfig) *cobra.Command {
@@ -228,7 +391,7 @@ func newDownloadCommand() *cobra.Command {
 	var connections, attempts int
 	var minSplitMiB int64
 	var stallTimeout time.Duration
-	var checksum, resumeKey string
+	var checksum, resumeKey, speed, proxy string
 	var overwrite bool
 	var headers headerFlags
 	cmd := &cobra.Command{
@@ -236,18 +399,33 @@ func newDownloadCommand() *cobra.Command {
 		Short: "Download a file directly without the service",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			values, err := headers.values()
+			if err != nil {
+				return err
+			}
 			h := make(http.Header)
-			for _, raw := range headers {
-				name, value, _ := strings.Cut(raw, ":")
-				name, value = strings.TrimSpace(name), strings.TrimSpace(value)
-				if name == "" {
-					return fmt.Errorf("invalid empty header name in %q", raw)
-				}
-				h.Add(name, value)
+			for name, value := range values {
+				h.Set(name, value)
+			}
+			limit, err := parseSpeed(speed)
+			if err != nil {
+				return err
+			}
+			var limiters []*rate.Limiter
+			if limit > 0 {
+				limiters = append(limiters, rate.NewLimiter(rate.Limit(limit), 256<<10))
+			}
+			proxyCfg := netproxy.Config{Mode: netproxy.Mode(proxy)}
+			if strings.Contains(proxy, "://") {
+				proxyCfg = netproxy.Config{Mode: netproxy.ModeManual, URL: proxy}
+			}
+			if err := proxyCfg.Validate(); err != nil {
+				return err
 			}
 			e, err := engine.New(engine.Config{
 				Connections: connections, MinSplitSize: minSplitMiB << 20, MaxAttempts: attempts,
 				StallTimeout: stallTimeout, Headers: h, Checksum: checksum, ResumeKey: resumeKey, Overwrite: overwrite,
+				Limiters: limiters, Proxy: netproxy.Func(func() netproxy.Config { return proxyCfg }),
 			})
 			if err != nil {
 				return err
@@ -279,6 +457,8 @@ func newDownloadCommand() *cobra.Command {
 	cmd.Flags().StringVar(&resumeKey, "resume-key", "", "stable resume identity for expiring signed URLs")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace an existing destination")
 	cmd.Flags().Var(&headers, "header", "request header; repeatable, for example --header 'Authorization: Bearer ...'")
+	cmd.Flags().StringVar(&speed, "speed-limit", "0", "speed limit in bytes per second, with K, M, or G suffix; 0 for none")
+	cmd.Flags().StringVar(&proxy, "proxy", "system", "system, none, or a proxy URL (http://, https://, socks5://)")
 	return cmd
 }
 

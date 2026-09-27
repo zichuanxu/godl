@@ -8,14 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/zichuanxu/godl/internal/download"
 	"github.com/zichuanxu/godl/internal/logging"
+	"github.com/zichuanxu/godl/internal/settings"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -23,21 +29,29 @@ var (
 	ErrActive            = download.ErrActive
 )
 
-// busyRetryDelay is how long a download whose destination is locked by
-// another process waits before the scheduler tries it again.
-const busyRetryDelay = 5 * time.Second
+const (
+	// busyRetryDelay is how long a download whose destination is locked by
+	// another process waits before the scheduler tries it again.
+	busyRetryDelay = 5 * time.Second
+	// limiterBurst bounds one limiter wait; the engine reads in slices no
+	// larger than this while a limit is in force.
+	limiterBurst = 256 << 10
+)
 
 type Options struct {
-	MaxConcurrent int
-	Publish       func(download.Event)
-	Now           func() time.Time
-	Logger        *slog.Logger
+	Publish func(download.Event)
+	Now     func() time.Time
+	Logger  *slog.Logger
 	// DownloadRoots lists the directories destinations must resolve inside.
 	DownloadRoots []string
 	// FlushInterval is how often in-memory progress is persisted, orphaned
-	// running rows are requeued, and the scheduler retries after a store
-	// error. It defaults to 5s.
+	// running rows are requeued, the schedule is applied, and the scheduler
+	// retries after a store error. It defaults to 5s.
 	FlushInterval time.Duration
+	// Defaults are used until settings are saved; zero means settings.Default().
+	Defaults settings.Settings
+	// InspectTimeout bounds the probe that names a download; default 15s.
+	InspectTimeout time.Duration
 }
 
 // job is the in-memory state of a started runner. item mirrors the stored row
@@ -49,6 +63,10 @@ type job struct {
 	item      download.Item
 	completed atomic.Int64
 	total     atomic.Int64
+	// host and conns are this job's share of the per-host connection cap.
+	host    string
+	conns   int
+	limiter *rate.Limiter
 }
 
 func (j *job) progress() (completed, total int64) {
@@ -66,12 +84,18 @@ type Manager struct {
 	progressWake chan struct{}
 	wg           sync.WaitGroup
 
-	// mu serializes status transitions, guards active, retryAt, and job
-	// items, and orders published events with the state they describe.
-	// Publish must not block.
-	mu      sync.Mutex
-	active  map[string]*job
-	retryAt map[string]time.Time
+	// global caps all downloads together; its limit follows the schedule.
+	global *rate.Limiter
+	// settings is replaced under mu and read without it.
+	settings atomic.Pointer[settings.Settings]
+
+	// mu serializes status transitions, guards active, retryAt, hostConns,
+	// and job items, and orders published events with the state they
+	// describe. Publish must not block.
+	mu        sync.Mutex
+	active    map[string]*job
+	retryAt   map[string]time.Time
+	hostConns map[string]int
 }
 
 func New(repo download.Repository, runner download.Runner, opts Options) (*Manager, error) {
@@ -80,12 +104,6 @@ func New(repo download.Repository, runner download.Runner, opts Options) (*Manag
 	}
 	if runner == nil {
 		return nil, errors.New("nil download runner")
-	}
-	if opts.MaxConcurrent == 0 {
-		opts.MaxConcurrent = 3
-	}
-	if opts.MaxConcurrent < 1 {
-		return nil, errors.New("max concurrent downloads must be positive")
 	}
 	if opts.Publish == nil {
 		opts.Publish = func(download.Event) {}
@@ -99,34 +117,118 @@ func New(repo download.Repository, runner download.Runner, opts Options) (*Manag
 	if opts.FlushInterval <= 0 {
 		opts.FlushInterval = 5 * time.Second
 	}
+	if opts.InspectTimeout <= 0 {
+		opts.InspectTimeout = 15 * time.Second
+	}
+	if opts.Defaults.MaxConcurrent == 0 {
+		opts.Defaults = settings.Default()
+	}
 	roots, err := resolveRoots(opts.DownloadRoots)
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{
+	m := &Manager{
 		repo: repo, runner: runner, opts: opts, roots: roots, log: opts.Logger,
 		wake: make(chan struct{}, 1), progressWake: make(chan struct{}, 1),
-		active: make(map[string]*job), retryAt: make(map[string]time.Time),
-	}, nil
+		global: rate.NewLimiter(rate.Inf, limiterBurst),
+		active: make(map[string]*job), retryAt: make(map[string]time.Time), hostConns: make(map[string]int),
+	}
+	stored, ok, err := repo.LoadSettings(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		stored = opts.Defaults
+	}
+	if err := stored.Validate(); err != nil {
+		// A bad row must not keep the service from starting.
+		m.log.Error("stored settings are invalid; using defaults", "err", err)
+		stored = opts.Defaults
+	}
+	m.settings.Store(&stored)
+	m.applySchedule(opts.Now())
+	return m, nil
 }
 
-func (m *Manager) Add(ctx context.Context, rawURL, destination string) (download.Item, error) {
-	if err := validateURL(rawURL); err != nil {
+// allowedRoots are the service's download roots plus the directories picked
+// in the GUI.
+func (m *Manager) allowedRoots() []string {
+	extra := m.Settings().ExtraRoots
+	if len(extra) == 0 {
+		return m.roots
+	}
+	roots := append([]string(nil), m.roots...)
+	for _, dir := range extra {
+		if resolved, err := resolveRoots([]string{dir}); err == nil {
+			roots = append(roots, resolved...)
+		}
+	}
+	return roots
+}
+
+// Settings returns the settings in force.
+func (m *Manager) Settings() settings.Settings {
+	return *m.settings.Load()
+}
+
+// UpdateSettings validates, stores, and applies new settings. Site passwords
+// sent back as settings.Masked keep their stored value.
+func (m *Manager) UpdateSettings(ctx context.Context, s settings.Settings) error {
+	s = s.Unmask(m.Settings())
+	if err := s.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", download.ErrInvalidSettings, err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.repo.SaveSettings(ctx, s); err != nil {
+		return err
+	}
+	m.settings.Store(&s)
+	m.applySchedule(m.opts.Now())
+	m.log.Info("settings updated")
+	m.signal()
+	return nil
+}
+
+func (m *Manager) Add(ctx context.Context, req download.Request) (download.Item, error) {
+	invalid := func(err error) (download.Item, error) {
 		return download.Item{}, fmt.Errorf("%w: %w", download.ErrInvalidDownload, err)
 	}
-	destination, err := confine(m.roots, destination)
+	rawURL := strings.TrimSpace(req.URL)
+	if err := validateURL(rawURL); err != nil {
+		return invalid(err)
+	}
+	if err := validateOptions(&req.Priority, &req.Connections, &req.SpeedLimit); err != nil {
+		return invalid(err)
+	}
+	for name, value := range req.Headers {
+		if err := settings.ValidateHeader(name, value); err != nil {
+			return invalid(err)
+		}
+	}
+	destination := strings.TrimSpace(req.Destination)
+	named := destination == ""
+	if named {
+		// The name comes from the server; probe before taking the lock.
+		dir := strings.TrimSpace(req.Directory)
+		if dir != "" && !filepath.IsAbs(dir) {
+			return invalid(errors.New("directory must be an absolute path"))
+		}
+		name := m.resolveName(ctx, rawURL, m.headers(hostOf(rawURL), req.Headers))
+		if dir == "" {
+			dir = filepath.Join(m.roots[0], category(name))
+		}
+		destination = filepath.Join(dir, name)
+	}
+	destination, err := confine(m.allowedRoots(), destination)
 	if err != nil {
-		return download.Item{}, fmt.Errorf("%w: %w", download.ErrInvalidDownload, err)
+		return invalid(err)
 	}
 	id, err := newID()
 	if err != nil {
 		return download.Item{}, err
 	}
 	now := m.opts.Now().UTC()
-	item := download.Item{
-		ID: id, URL: rawURL, Destination: destination, Status: download.StatusQueued,
-		CreatedAt: now, UpdatedAt: now,
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Two items sharing a destination would share .part files, and deleting
@@ -135,10 +237,27 @@ func (m *Manager) Add(ctx context.Context, rawURL, destination string) (download
 	if err != nil {
 		return download.Item{}, err
 	}
-	for _, existing := range items {
-		if samePath(existing.Destination, destination) {
-			return download.Item{}, fmt.Errorf("%w: destination %s is already used by download %s", download.ErrInvalidDownload, destination, existing.ID)
+	owner := func(path string) string {
+		for _, existing := range items {
+			if clashes(existing.Destination, path) {
+				return existing.ID
+			}
 		}
+		return ""
+	}
+	if named {
+		destination, err = freeName(filepath.Dir(destination), filepath.Base(destination), func(p string) bool { return owner(p) != "" })
+		if err != nil {
+			return download.Item{}, err
+		}
+	} else if other := owner(destination); other != "" {
+		return invalid(fmt.Errorf("destination %s is already used by download %s", destination, other))
+	}
+	item := download.Item{
+		ID: id, URL: rawURL, Destination: destination, Status: download.StatusQueued,
+		Priority: req.Priority, Connections: req.Connections, SpeedLimit: req.SpeedLimit,
+		Checksum: strings.TrimSpace(req.Checksum), Headers: req.Headers,
+		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := m.repo.Create(ctx, item); err != nil {
 		return download.Item{}, err
@@ -189,6 +308,55 @@ func (m *Manager) Retry(ctx context.Context, id string) error {
 	return m.requeue(ctx, id, download.StatusFailed)
 }
 
+// Update changes a download's priority, connections, or speed limit. A new
+// speed limit applies to a running download at once.
+func (m *Manager) Update(ctx context.Context, id string, p download.Patch) error {
+	var priority, conns int
+	var limit int64
+	if p.Priority != nil {
+		priority = *p.Priority
+	}
+	if p.Connections != nil {
+		conns = *p.Connections
+	}
+	if p.SpeedLimit != nil {
+		limit = *p.SpeedLimit
+	}
+	if err := validateOptions(&priority, &conns, &limit); err != nil {
+		return fmt.Errorf("%w: %w", download.ErrInvalidDownload, err)
+	}
+	if p.Headers != nil {
+		for name, value := range *p.Headers {
+			if err := settings.ValidateHeader(name, value); err != nil {
+				return fmt.Errorf("%w: %w", download.ErrInvalidDownload, err)
+			}
+		}
+	}
+	err := m.transition(ctx, id, func(item *download.Item) error {
+		if p.Priority != nil {
+			item.Priority = priority
+		}
+		if p.Connections != nil {
+			item.Connections = conns
+		}
+		if p.SpeedLimit != nil {
+			item.SpeedLimit = limit
+		}
+		if p.Headers != nil {
+			item.Headers = *p.Headers
+		}
+		if j, ok := m.active[id]; ok {
+			j.item.Priority, j.item.Connections, j.item.SpeedLimit = item.Priority, item.Connections, item.SpeedLimit
+			j.limiter.SetLimit(limitOf(item.SpeedLimit))
+		}
+		return nil
+	})
+	if err == nil {
+		m.signal()
+	}
+	return err
+}
+
 func (m *Manager) requeue(ctx context.Context, id string, from download.Status) error {
 	err := m.transition(ctx, id, func(item *download.Item) error {
 		if item.Status != from {
@@ -217,6 +385,9 @@ func (m *Manager) transition(ctx context.Context, id string, change func(*downlo
 	item, err := m.repo.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if j, ok := m.active[id]; ok {
+		item.Completed, item.Total = j.progress()
 	}
 	if err := change(&item); err != nil {
 		return err
@@ -255,7 +426,7 @@ func (m *Manager) Delete(ctx context.Context, id string, removeFiles bool) error
 		return nil
 	}
 	// Re-check confinement: a symlinked ancestor may have changed since Add.
-	if _, err := confine(m.roots, item.Destination); err != nil {
+	if _, err := confine(m.allowedRoots(), item.Destination); err != nil {
 		return fmt.Errorf("download deleted, but its files were kept: %w", err)
 	}
 	errs := []error{m.runner.Discard(item.Destination)}
@@ -286,6 +457,9 @@ func (m *Manager) Run(ctx context.Context) {
 		case <-ticker.C:
 			m.flush(ctx)
 			m.requeueOrphans(ctx)
+			m.mu.Lock()
+			m.applySchedule(m.opts.Now())
+			m.mu.Unlock()
 			m.schedule(ctx)
 		case <-m.progressWake:
 			m.publishProgress()
@@ -320,89 +494,125 @@ func (m *Manager) requeueOrphans(ctx context.Context) {
 	}
 }
 
+// applySchedule sets the global speed limit in force at now and stops
+// running downloads when the queue window closes; they return to the queue.
+// The caller holds m.mu.
+func (m *Manager) applySchedule(now time.Time) {
+	s := m.Settings()
+	m.global.SetLimit(limitOf(s.SpeedLimitAt(now)))
+	if s.QueueOpen(now) {
+		return
+	}
+	for id, j := range m.active {
+		if j.item.Status == download.StatusRunning {
+			m.log.Info("queue window closed; stopping download", "id", id)
+			j.cancel()
+		}
+	}
+}
+
+// schedule starts queued downloads, highest priority first and then in the
+// order they were added, while the queue window is open, capacity remains,
+// and their host has connections to spare.
 func (m *Manager) schedule(ctx context.Context) {
-	for ctx.Err() == nil {
-		m.mu.Lock()
-		capacity := m.opts.MaxConcurrent - len(m.active)
-		m.mu.Unlock()
-		if capacity <= 0 {
+	if ctx.Err() != nil {
+		return
+	}
+	items, err := m.repo.List(ctx) // ordered by creation
+	if err != nil {
+		m.log.Error("list downloads for scheduling", "err", err)
+		return
+	}
+	queued := items[:0]
+	for _, item := range items {
+		if item.Status == download.StatusQueued {
+			queued = append(queued, item)
+		}
+	}
+	sort.SliceStable(queued, func(a, b int) bool { return queued[a].Priority > queued[b].Priority })
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, now := m.Settings(), m.opts.Now()
+	if !s.QueueOpen(now) {
+		return
+	}
+	for _, item := range queued {
+		if len(m.active) >= s.MaxConcurrent {
 			return
 		}
-		items, err := m.repo.List(ctx)
-		if err != nil {
-			m.log.Error("list downloads for scheduling", "err", err)
-			return
-		}
-		started := false
-		for _, item := range items {
-			if item.Status != download.StatusQueued {
-				continue
-			}
-			ok, err := m.start(ctx, item.ID)
-			if err != nil {
-				// Retried on the next tick rather than in a hot loop.
-				m.log.Error("start download", "id", item.ID, "err", err)
-				return
-			}
-			if ok {
-				started = true
-				break
-			}
-		}
-		if !started {
+		if err := m.start(ctx, item.ID, s, now); err != nil {
+			// Retried on the next tick rather than in a hot loop.
+			m.log.Error("start download", "id", item.ID, "err", err)
 			return
 		}
 	}
 }
 
-func (m *Manager) start(ctx context.Context, id string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// start launches a queued download if its host has connections to spare.
+// The caller holds m.mu.
+func (m *Manager) start(ctx context.Context, id string, s settings.Settings, now time.Time) error {
 	if _, ok := m.active[id]; ok {
-		return false, nil
+		return nil
 	}
-	if at, ok := m.retryAt[id]; ok && m.opts.Now().Before(at) {
-		return false, nil
+	if at, ok := m.retryAt[id]; ok && now.Before(at) {
+		return nil
 	}
-	delete(m.retryAt, id)
 	item, err := m.repo.Get(ctx, id)
+	if errors.Is(err, download.ErrNotFound) {
+		return nil // deleted since the listing
+	}
 	if err != nil {
-		return false, err
+		return err
 	}
 	if item.Status != download.StatusQueued {
-		return false, nil
+		return nil
 	}
-	item.UpdatedAt = m.opts.Now().UTC()
+	// Four downloads at eight connections each must not become 32 sockets
+	// against one server: each takes what is left of its host's cap.
+	host := hostOf(item.URL)
+	conns := min(s.ConnectionsFor(host, item.Connections), s.HostConnectionsFor(host)-m.hostConns[host])
+	if conns < 1 {
+		return nil
+	}
+	delete(m.retryAt, id)
+	item.UpdatedAt = now.UTC()
 	// Re-check confinement: a symlinked ancestor may have changed since Add.
-	if _, err := confine(m.roots, item.Destination); err != nil {
+	if _, err := confine(m.allowedRoots(), item.Destination); err != nil {
 		item.Status = download.StatusFailed
 		item.Error = err.Error()
 		if err := m.repo.Update(ctx, item); err != nil {
-			return false, err
+			return err
 		}
 		m.publish(download.EventUpdated, item)
-		return false, nil
+		return nil
 	}
 	item.Status = download.StatusRunning
 	item.Error = ""
 	if err := m.repo.Update(ctx, item); err != nil {
-		return false, err
+		return err
 	}
 	workCtx, cancel := context.WithCancel(ctx)
-	j := &job{cancel: cancel, item: item}
+	j := &job{cancel: cancel, item: item, host: host, conns: conns, limiter: rate.NewLimiter(limitOf(item.SpeedLimit), limiterBurst)}
 	j.completed.Store(item.Completed)
 	j.total.Store(item.Total)
+	spec := download.Spec{
+		URL: item.URL, Destination: item.Destination, Connections: conns,
+		Headers: m.headers(host, item.Headers), Checksum: item.Checksum,
+		Limiters: []*rate.Limiter{m.global, j.limiter},
+	}
 	m.active[id] = j
+	m.hostConns[host] += conns
 	m.wg.Add(1)
-	m.log.Info("download started", "id", id, "url", logging.RedactURL(item.URL))
+	m.log.Info("download started", "id", id, "url", logging.RedactURL(item.URL), "connections", conns)
 	m.publish(download.EventUpdated, item)
-	go m.run(workCtx, j)
-	return true, nil
+	go m.run(workCtx, j, spec)
+	return nil
 }
 
-func (m *Manager) run(ctx context.Context, j *job) {
+func (m *Manager) run(ctx context.Context, j *job, spec download.Spec) {
 	defer m.wg.Done()
-	err := m.runner.Download(ctx, j.item.URL, j.item.Destination, func(p download.Progress) {
+	err := m.runner.Download(ctx, spec, func(p download.Progress) {
 		j.completed.Store(p.Completed)
 		j.total.Store(p.Total)
 		select {
@@ -420,6 +630,9 @@ func (m *Manager) finish(j *job, runErr error, canceled bool) {
 	defer m.mu.Unlock()
 	id := j.item.ID
 	delete(m.active, id)
+	if m.hostConns[j.host] -= j.conns; m.hostConns[j.host] <= 0 {
+		delete(m.hostConns, j.host)
+	}
 	defer m.signal()
 
 	item, err := m.repo.Get(context.Background(), id)
@@ -446,7 +659,7 @@ func (m *Manager) finish(j *job, runErr error, canceled bool) {
 		item.Status = download.StatusQueued
 		m.retryAt[id] = m.opts.Now().Add(busyRetryDelay)
 	case canceled:
-		// Service shutdown: resume automatically on the next start.
+		// Service shutdown or a closing queue window: resume later.
 		item.Status = download.StatusQueued
 	default:
 		item.Status = download.StatusFailed
@@ -529,6 +742,60 @@ func validateURL(rawURL string) error {
 		return errors.New("download URL must be an absolute http or https URL")
 	}
 	return nil
+}
+
+// validateOptions checks per-download options, clamping nothing.
+func validateOptions(priority, conns *int, speedLimit *int64) error {
+	switch {
+	case *priority < download.PriorityLow || *priority > download.PriorityHigh:
+		return fmt.Errorf("priority must be %d, %d, or %d", download.PriorityLow, download.PriorityNormal, download.PriorityHigh)
+	case *conns < 0 || *conns > settings.MaxConnections:
+		return fmt.Errorf("connections must be in [1, %d], or 0 for the default", settings.MaxConnections)
+	case *speedLimit < 0:
+		return errors.New("speed limit cannot be negative")
+	}
+	return nil
+}
+
+// resolveName probes the URL for a server-supplied name, falling back to the
+// URL when the probe fails; the download itself reports real errors later.
+func (m *Manager) resolveName(ctx context.Context, rawURL string, headers http.Header) string {
+	ctx, cancel := context.WithTimeout(ctx, m.opts.InspectTimeout)
+	defer cancel()
+	remote, err := m.runner.Inspect(ctx, rawURL, headers)
+	if err != nil {
+		m.log.Warn("inspect download for its name", "url", logging.RedactURL(rawURL), "err", err)
+		return fileName("", rawURL)
+	}
+	if remote.URL == "" {
+		remote.URL = rawURL
+	}
+	return fileName(remote.Filename, remote.URL)
+}
+
+// headers merges the site's headers and credentials with the download's own.
+func (m *Manager) headers(host string, own map[string]string) http.Header {
+	h := m.Settings().HeadersFor(host)
+	for name, value := range own {
+		h.Set(name, value)
+	}
+	return h
+}
+
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// limitOf converts bytes per second to a limiter rate; 0 is unlimited.
+func limitOf(bytesPerSecond int64) rate.Limit {
+	if bytesPerSecond <= 0 {
+		return rate.Inf
+	}
+	return rate.Limit(bytesPerSecond)
 }
 
 func newID() (string, error) {

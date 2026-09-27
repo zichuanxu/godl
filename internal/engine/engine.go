@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zichuanxu/godl/internal/filelock"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -60,6 +62,11 @@ type Config struct {
 	Overwrite bool
 	// FileMode is applied after the complete file has been verified.
 	FileMode os.FileMode
+	// Limiters cap body reads (DESIGN.md 3.9); every one must admit the bytes.
+	// Time spent waiting on them never counts toward the stall timeout.
+	Limiters []*rate.Limiter
+	// Proxy selects the proxy for the default clients; nil connects directly.
+	Proxy func(*http.Request) (*url.URL, error)
 
 	// ProbeClient negotiates protocols normally; SegmentClient forces
 	// HTTP/1.1 so every connection gets its own TCP congestion window.
@@ -129,11 +136,11 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Headers = make(http.Header)
 	}
 	if cfg.ProbeClient == nil {
-		cfg.ProbeClient = newProbeClient()
+		cfg.ProbeClient = newProbeClient(cfg.Proxy)
 	}
 	if cfg.SegmentClient == nil {
-		// ponytail: one pool for every download; per-host caps arrive in M2.
-		cfg.SegmentClient = newSegmentClient(2 * maxConnections)
+		// The manager enforces per-host caps; this only bounds the pool.
+		cfg.SegmentClient = newSegmentClient(2*maxConnections, cfg.Proxy)
 	}
 	sum, err := parseChecksum(cfg.Checksum)
 	if err != nil {
@@ -275,6 +282,8 @@ type probeInfo struct {
 	ranges       bool
 	etag         string // strong ETag only
 	lastModified string
+	// For Inspect.
+	disposition, contentType, finalURL string
 }
 
 func (e *Engine) probe(ctx context.Context, rawURL string) (probeInfo, error) {
@@ -321,7 +330,11 @@ func (e *Engine) probeOnce(ctx context.Context, rawURL string) (probeInfo, *atte
 	if err := identityEncoding(resp); err != nil {
 		return probeInfo{}, fatal(err)
 	}
-	info := probeInfo{etag: strongETag(resp.Header.Get("ETag")), lastModified: resp.Header.Get("Last-Modified")}
+	info := probeInfo{
+		etag: strongETag(resp.Header.Get("ETag")), lastModified: resp.Header.Get("Last-Modified"),
+		disposition: resp.Header.Get("Content-Disposition"), contentType: resp.Header.Get("Content-Type"),
+		finalURL: resp.Request.URL.String(),
+	}
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
 		start, end, total, ok := parseContentRange(resp.Header.Get("Content-Range"))
@@ -394,6 +407,73 @@ func statusError(what string, resp *http.Response) *attemptError {
 		msg += ": " + text
 	}
 	return &attemptError{err: errors.New(msg), retryable: retryableStatus(resp.StatusCode), retryAfter: resp.Header.Get("Retry-After")}
+}
+
+// Remote describes a resource as the capability probe saw it.
+type Remote struct {
+	// Filename is the Content-Disposition file name, if the server sent one.
+	Filename    string
+	URL         string // after redirects
+	ContentType string
+	Size        int64 // -1 when unknown
+}
+
+// Inspect probes rawURL without downloading it, for naming and type checks.
+func (e *Engine) Inspect(ctx context.Context, rawURL string) (Remote, error) {
+	if err := validateHTTPURL(rawURL); err != nil {
+		return Remote{}, err
+	}
+	info, err := e.probe(ctx, rawURL)
+	if err != nil {
+		return Remote{}, err
+	}
+	return Remote{URL: info.finalURL, ContentType: info.contentType, Size: info.size, Filename: dispositionName(info.disposition)}, nil
+}
+
+// dispositionName reads the file name of a Content-Disposition header.
+// mime decodes RFC 5987 filename* into "filename"; a malformed header such as
+// an unquoted name with spaces falls back to a lenient split. Callers
+// sanitize the result.
+func dispositionName(header string) string {
+	if _, params, err := mime.ParseMediaType(header); err == nil {
+		return params["filename"]
+	}
+	_, rest, ok := strings.Cut(header, "filename=")
+	if !ok {
+		return ""
+	}
+	rest, _, _ = strings.Cut(rest, ";")
+	return strings.Trim(strings.TrimSpace(rest), `"`)
+}
+
+// limit shrinks a read to what one limiter wait can admit.
+func (e *Engine) limit(n int64) int64 {
+	for _, l := range e.cfg.Limiters {
+		if l.Limit() != rate.Inf {
+			n = min(n, int64(l.Burst()))
+		}
+	}
+	return n
+}
+
+// wait blocks until every limiter admits n bytes.
+func (e *Engine) wait(ctx context.Context, n int) error {
+	for _, l := range e.cfg.Limiters {
+		if err := l.WaitN(ctx, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// limited reports whether any limiter currently caps the speed.
+func (e *Engine) limited() bool {
+	for _, l := range e.cfg.Limiters {
+		if l.Limit() != rate.Inf {
+			return true
+		}
+	}
+	return false
 }
 
 // progressReporter publishes byte counts at most once per interval from its

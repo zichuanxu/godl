@@ -44,7 +44,7 @@ func TestClientListsAddsAndPausesDownloads(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].ID != "existing" {
 		t.Fatalf("List = %+v, %v", items, err)
 	}
-	item, err := c.Add(context.Background(), "https://example.com/file", "/tmp/file")
+	item, err := c.Add(context.Background(), download.Request{URL: "https://example.com/file", Destination: "/tmp/file"})
 	if err != nil || item.ID != "created" {
 		t.Fatalf("Add = %+v, %v", item, err)
 	}

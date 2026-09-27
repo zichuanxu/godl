@@ -15,21 +15,23 @@ import (
 
 	"github.com/zichuanxu/godl/internal/api"
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/settings"
 )
 
 const token = "test-token"
 
 type fakeDownloads struct {
-	mu      sync.Mutex
-	items   []download.Item
-	calls   []string
-	failure error
+	mu       sync.Mutex
+	items    []download.Item
+	calls    []string
+	failure  error
+	settings settings.Settings
 }
 
-func (f *fakeDownloads) Add(_ context.Context, rawURL, destination string) (download.Item, error) {
+func (f *fakeDownloads) Add(_ context.Context, req download.Request) (download.Item, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	item := download.Item{ID: "id-1", URL: rawURL, Destination: destination, Status: download.StatusQueued}
+	item := download.Item{ID: "id-1", URL: req.URL, Destination: req.Destination, Status: download.StatusQueued, Priority: req.Priority}
 	f.items = append(f.items, item)
 	return item, nil
 }
@@ -52,6 +54,23 @@ func (f *fakeDownloads) Resume(_ context.Context, id string) error { return f.re
 func (f *fakeDownloads) Retry(_ context.Context, id string) error  { return f.record("retry " + id) }
 func (f *fakeDownloads) Delete(_ context.Context, id string, files bool) error {
 	return f.record(fmt.Sprintf("delete %s files=%v", id, files))
+}
+func (f *fakeDownloads) Update(_ context.Context, id string, p download.Patch) error {
+	return f.record(fmt.Sprintf("update %s priority=%d", id, *p.Priority))
+}
+func (f *fakeDownloads) Settings() settings.Settings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.settings
+}
+func (f *fakeDownloads) UpdateSettings(_ context.Context, s settings.Settings) error {
+	if err := f.record("settings"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = s
+	return nil
 }
 
 func newServer(t *testing.T, downloads api.Downloads, broker *api.Broker) *httptest.Server {
@@ -93,13 +112,16 @@ func TestDownloadHTTPContract(t *testing.T) {
 	downloads := &fakeDownloads{}
 	server := newServer(t, downloads, api.NewBroker(16))
 
-	resp := send(t, http.MethodPost, server.URL+"/v1/downloads", `{"url":"https://example.com/file.bin","destination":"/tmp/file.bin"}`, nil)
+	resp := send(t, http.MethodPost, server.URL+"/v1/downloads", `{"url":"https://example.com/file.bin","destination":"/tmp/file.bin","priority":1,"headers":{"Cookie":"a=b"}}`, nil)
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("POST status = %d; want 202", resp.StatusCode)
 	}
+	if resp := send(t, http.MethodPost, server.URL+"/v1/downloads", `{"url":"x","bogus":1}`, nil); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown field status = %d; want 400", resp.StatusCode)
+	}
 	var created download.Item
 	decodeJSON(t, resp.Body, &created)
-	if created.ID != "id-1" || created.Status != download.StatusQueued {
+	if created.ID != "id-1" || created.Status != download.StatusQueued || created.Priority != 1 {
 		t.Fatalf("created = %+v", created)
 	}
 
@@ -115,13 +137,27 @@ func TestDownloadHTTPContract(t *testing.T) {
 			t.Fatalf("%s status = %d; want 204", verb, resp.StatusCode)
 		}
 	}
+	if resp := send(t, http.MethodPatch, server.URL+"/v1/downloads/id-1", `{"priority":-1}`, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("patch status = %d; want 204", resp.StatusCode)
+	}
 	if resp := send(t, http.MethodDelete, server.URL+"/v1/downloads/id-1?files=true", "", nil); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status = %d; want 204", resp.StatusCode)
+	}
+	resp = send(t, http.MethodPut, server.URL+"/v1/settings", `{"maxConcurrent":5,"connections":8,"hostConnections":16}`, nil)
+	var saved settings.Settings
+	decodeJSON(t, resp.Body, &saved)
+	if resp.StatusCode != http.StatusOK || saved.MaxConcurrent != 5 {
+		t.Fatalf("PUT settings = %d %+v", resp.StatusCode, saved)
+	}
+	resp = send(t, http.MethodGet, server.URL+"/v1/settings", "", nil)
+	decodeJSON(t, resp.Body, &saved)
+	if saved.MaxConcurrent != 5 {
+		t.Fatalf("GET settings = %+v", saved)
 	}
 	if resp := send(t, http.MethodPost, server.URL+"/v1/downloads/id-1:explode", "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown verb status = %d; want 404", resp.StatusCode)
 	}
-	want := []string{"pause id-1", "resume id-1", "retry id-1", "delete id-1 files=true"}
+	want := []string{"pause id-1", "resume id-1", "retry id-1", "update id-1 priority=-1", "delete id-1 files=true", "settings"}
 	if fmt.Sprint(downloads.calls) != fmt.Sprint(want) {
 		t.Fatalf("calls = %v; want %v", downloads.calls, want)
 	}

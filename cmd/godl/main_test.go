@@ -147,7 +147,7 @@ func TestServiceResumesAfterKill(t *testing.T) {
 	dest := filepath.Join(root, "big.bin")
 
 	first := startServiceProcess(t, dir, root)
-	if _, err := first.client.Add(context.Background(), server.URL+"/big.bin", dest); err != nil {
+	if _, err := first.client.Add(context.Background(), download.Request{URL: server.URL + "/big.bin", Destination: dest}); err != nil {
 		t.Fatal(err)
 	}
 	// The server's byte count is a precise, poll-free signal of progress.
@@ -218,5 +218,24 @@ func TestVersionCommand(t *testing.T) {
 	out, err := godl("version").CombinedOutput()
 	if err != nil || !strings.HasPrefix(string(out), "godl dev (commit none") {
 		t.Fatalf("version output = %q, %v", out, err)
+	}
+}
+
+func TestParseSpeedAndPriority(t *testing.T) {
+	for in, want := range map[string]int64{"0": 0, "500": 500, "500K": 500 << 10, "2m": 2 << 20, "1.5M": 3 << 19, "1G/s": 1 << 30, "4KB": 4096} {
+		if got, err := parseSpeed(in); err != nil || got != want {
+			t.Errorf("parseSpeed(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"-1", "fast", "2T"} {
+		if _, err := parseSpeed(bad); err == nil {
+			t.Errorf("parseSpeed(%q) accepted", bad)
+		}
+	}
+	if p, err := parsePriority("HIGH"); err != nil || p != 1 {
+		t.Fatalf("parsePriority = %d, %v", p, err)
+	}
+	if _, err := parsePriority("urgent"); err == nil {
+		t.Fatal("unknown priority accepted")
 	}
 }

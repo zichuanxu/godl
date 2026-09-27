@@ -16,15 +16,19 @@ import (
 	"sync/atomic"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/settings"
 )
 
 type Downloads interface {
-	Add(context.Context, string, string) (download.Item, error)
+	Add(context.Context, download.Request) (download.Item, error)
 	List(context.Context) ([]download.Item, error)
 	Pause(context.Context, string) error
 	Resume(context.Context, string) error
 	Retry(context.Context, string) error
+	Update(context.Context, string, download.Patch) error
 	Delete(ctx context.Context, id string, removeFiles bool) error
+	Settings() settings.Settings
+	UpdateSettings(context.Context, settings.Settings) error
 }
 
 // Broker fans events out to SSE subscribers. A subscriber that falls behind is
@@ -103,7 +107,10 @@ func NewHandler(downloads Downloads, broker *Broker, cfg Config) http.Handler {
 	mux.HandleFunc("GET /v1/downloads", h.list)
 	mux.HandleFunc("POST /v1/downloads", h.add)
 	mux.HandleFunc("POST /v1/downloads/{action}", h.command)
+	mux.HandleFunc("PATCH /v1/downloads/{id}", h.update)
 	mux.HandleFunc("DELETE /v1/downloads/{id}", h.delete)
+	mux.HandleFunc("GET /v1/settings", h.getSettings)
+	mux.HandleFunc("PUT /v1/settings", h.putSettings)
 	mux.HandleFunc("GET /v1/events", h.events)
 	return h.guard(mux)
 }
@@ -169,27 +176,56 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		URL         string `json:"url"`
-		Destination string `json:"destination"`
-	}
+// decode reads a JSON body strictly, answering 400 itself on failure.
+func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Request body must contain a URL and destination")
+	if err := decoder.Decode(into); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (h *Handler) add(w http.ResponseWriter, r *http.Request) {
+	var input download.Request
+	if !decode(w, r, &input) {
 		return
 	}
-	item, err := h.downloads.Add(r.Context(), strings.TrimSpace(input.URL), strings.TrimSpace(input.Destination))
-	if errors.Is(err, download.ErrInvalidDownload) {
-		writeError(w, http.StatusUnprocessableEntity, "INVALID_DOWNLOAD", err.Error())
-		return
-	}
+	item, err := h.downloads.Add(r.Context(), input)
 	if err != nil {
 		h.writeCommandError(w, "add download", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, item)
+}
+
+func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+	var patch download.Patch
+	if !decode(w, r, &patch) {
+		return
+	}
+	if err := h.downloads.Update(r.Context(), r.PathValue("id"), patch); err != nil {
+		h.writeCommandError(w, "update download", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) getSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, h.downloads.Settings().Masked())
+}
+
+func (h *Handler) putSettings(w http.ResponseWriter, r *http.Request) {
+	var s settings.Settings
+	if !decode(w, r, &s) {
+		return
+	}
+	if err := h.downloads.UpdateSettings(r.Context(), s); err != nil {
+		h.writeCommandError(w, "update settings", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.downloads.Settings().Masked())
 }
 
 func (h *Handler) command(w http.ResponseWriter, r *http.Request) {
@@ -285,6 +321,10 @@ func (h *Handler) writeCommandError(w http.ResponseWriter, action string, err er
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "Download not found")
 	case errors.Is(err, download.ErrInvalidTransition), errors.Is(err, download.ErrActive):
 		writeError(w, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, download.ErrInvalidDownload):
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_DOWNLOAD", err.Error())
+	case errors.Is(err, download.ErrInvalidSettings):
+		writeError(w, http.StatusUnprocessableEntity, "INVALID_SETTINGS", err.Error())
 	default:
 		h.log.Error(action, "err", err)
 		writeError(w, http.StatusInternalServerError, "INTERNAL", "Unable to "+action)

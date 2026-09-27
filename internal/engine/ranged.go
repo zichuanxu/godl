@@ -185,6 +185,9 @@ func (r *rangedRun) every(stop <-chan struct{}, interval time.Duration, fn func(
 // ponytail: all-busy slow ranges only reconnect (at most every slowMinAge);
 // spawning an extra connection to take the upper half is the upgrade path.
 func (r *rangedRun) replaceSlow() {
+	if r.job.engine.limited() {
+		return // every connection is slow on purpose
+	}
 	now := time.Now()
 	type sample struct {
 		seg   *segment
@@ -328,7 +331,7 @@ func (r *rangedRun) fetch(ctx context.Context, seg *segment, buf []byte) (progre
 	}
 
 	for {
-		cursor, n := seg.window(int64(len(buf)))
+		cursor, n := seg.window(e.limit(int64(len(buf))))
 		if n <= 0 {
 			return progressed, nil // done, or the rest was stolen
 		}
@@ -337,7 +340,10 @@ func (r *rangedRun) fetch(ctx context.Context, seg *segment, buf []byte) (progre
 		// the buffer, which keeps steals from cutting through it.
 		m, readErr := resp.Body.Read(buf[:n])
 		if m > 0 {
-			stall.Stop() // a slow disk is not a stalled connection
+			stall.Stop() // neither a rate limit nor a slow disk is a stall
+			if err := e.wait(ctx, m); err != nil {
+				return progressed, interrupted(err)
+			}
 			if _, err := r.file.WriteAt(buf[:m], cursor); err != nil {
 				return progressed, fatal(fmt.Errorf("write partial file: %w", err))
 			}

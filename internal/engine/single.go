@@ -97,9 +97,12 @@ func (j *job) singleOnce(ctx context.Context, info probeInfo) *attemptError {
 	buf := make([]byte, bufferSize)
 	var written int64
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := resp.Body.Read(buf[:e.limit(bufferSize)])
 		if n > 0 {
 			stall.Stop()
+			if err := e.wait(ctx, n); err != nil {
+				return interrupted(err)
+			}
 			if _, err := f.Write(buf[:n]); err != nil {
 				return fatal(fmt.Errorf("write partial file: %w", err))
 			}

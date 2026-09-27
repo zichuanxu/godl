@@ -7,7 +7,7 @@ import (
 )
 
 func TestSegmentClientForcesHTTP11(t *testing.T) {
-	client := newSegmentClient(6)
+	client := newSegmentClient(6, nil)
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("transport type = %T", client.Transport)

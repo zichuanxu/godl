@@ -11,7 +11,8 @@ import (
 	"strings"
 )
 
-func dataDir() (string, error) {
+// DataDir is the per-user godl directory holding the database, token, and logs.
+func DataDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("locate user config directory: %w", err)
@@ -24,7 +25,7 @@ func dataDir() (string, error) {
 }
 
 func DefaultDatabasePath() (string, error) {
-	dir, err := dataDir()
+	dir, err := DataDir()
 	if err != nil {
 		return "", err
 	}
@@ -33,7 +34,7 @@ func DefaultDatabasePath() (string, error) {
 
 // DefaultTokenPath is where the service stores, and the CLI reads, the API token.
 func DefaultTokenPath() (string, error) {
-	dir, err := dataDir()
+	dir, err := DataDir()
 	if err != nil {
 		return "", err
 	}

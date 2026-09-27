@@ -13,7 +13,10 @@ import (
 
 	"github.com/zichuanxu/godl/internal/api"
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/engine"
 	"github.com/zichuanxu/godl/internal/manager"
+	"github.com/zichuanxu/godl/internal/netproxy"
+	"github.com/zichuanxu/godl/internal/secrets"
 	"github.com/zichuanxu/godl/internal/store"
 )
 
@@ -24,9 +27,13 @@ type Config struct {
 	TokenPath string
 	// DownloadRoots confine destinations; they default to DefaultDownloadRoot.
 	DownloadRoots []string
-	Runner        download.Runner
-	MaxConcurrent int
-	Logger        *slog.Logger
+	// Runner defaults to the engine, using the proxy from the settings.
+	Runner download.Runner
+	Logger *slog.Logger
+	// Publish also receives every manager event; it must not block.
+	Publish func(download.Event)
+	// Sealer encrypts stored secrets; it defaults to a key in the OS keyring.
+	Sealer *secrets.Sealer
 }
 
 type Service struct {
@@ -55,9 +62,6 @@ func New(cfg Config) (*Service, error) {
 	if cfg.DatabasePath == "" {
 		return nil, errors.New("database path is required")
 	}
-	if cfg.Runner == nil {
-		return nil, errors.New("download runner is required")
-	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
@@ -79,14 +83,43 @@ func New(cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := store.Open(cfg.DatabasePath)
+	if cfg.Sealer == nil {
+		sealer, err := secrets.Open()
+		if err != nil {
+			return nil, err
+		}
+		if sealer.KeyringErr != nil {
+			cfg.Logger.Warn("secrets kept in memory only", "err", sealer.KeyringErr)
+		}
+		cfg.Sealer = sealer
+	}
+	db, err := store.Open(cfg.DatabasePath, cfg.Sealer)
 	if err != nil {
 		return nil, err
 	}
+	// The proxy reads the manager's settings on every connection; no request
+	// is made before New returns.
+	var mgr *manager.Manager
+	if cfg.Runner == nil {
+		runner, err := engine.NewRunner(engine.Config{
+			Proxy: netproxy.Func(func() netproxy.Config { return mgr.Settings().Proxy }),
+		})
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		cfg.Runner = runner
+	}
 	broker := api.NewBroker(256)
-	mgr, err := manager.New(db, cfg.Runner, manager.Options{
-		MaxConcurrent: cfg.MaxConcurrent,
-		Publish:       broker.Publish,
+	publish := broker.Publish
+	if extra := cfg.Publish; extra != nil {
+		publish = func(e download.Event) {
+			broker.Publish(e)
+			extra(e)
+		}
+	}
+	mgr, err = manager.New(db, cfg.Runner, manager.Options{
+		Publish:       publish,
 		Logger:        cfg.Logger,
 		DownloadRoots: cfg.DownloadRoots,
 	})
@@ -148,6 +181,11 @@ func (s *Service) Start(ctx context.Context) error {
 	}()
 	s.log.Info("service listening", "address", listener.Addr().String())
 	return nil
+}
+
+// Manager is the queue, for hosts that call it in process.
+func (s *Service) Manager() *manager.Manager {
+	return s.manager
 }
 
 func (s *Service) Address() string {

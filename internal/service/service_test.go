@@ -9,12 +9,17 @@ import (
 	"time"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/secrets"
 	"github.com/zichuanxu/godl/internal/service"
 )
 
 type idleRunner struct{}
 
-func (idleRunner) Download(context.Context, string, string, func(download.Progress)) error {
+func (idleRunner) Inspect(context.Context, string, http.Header) (download.Remote, error) {
+	return download.Remote{}, nil
+}
+
+func (idleRunner) Download(context.Context, download.Spec, func(download.Progress)) error {
 	return nil
 }
 
@@ -30,6 +35,7 @@ func startService(t *testing.T) (*service.Service, string, context.CancelFunc) {
 		TokenPath:     tokenPath,
 		DownloadRoots: []string{filepath.Join(dir, "downloads")},
 		Runner:        idleRunner{},
+		Sealer:        testSealer(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,4 +118,12 @@ func TestLoadOrCreateTokenIsStable(t *testing.T) {
 	if len(first) != 64 || first != second {
 		t.Fatalf("tokens = %q, %q; want one stable 64-hex token", first, second)
 	}
+}
+
+func testSealer(t *testing.T) *secrets.Sealer {
+	s, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

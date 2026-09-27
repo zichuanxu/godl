@@ -4,21 +4,27 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/zichuanxu/godl/internal/download"
+	"github.com/zichuanxu/godl/internal/secrets"
+	"github.com/zichuanxu/godl/internal/settings"
 	_ "modernc.org/sqlite"
 )
 
 var ErrNotFound = download.ErrNotFound
 
 type SQLite struct {
-	db *sql.DB
+	db     *sql.DB
+	sealer *secrets.Sealer
 }
 
-func Open(path string) (*SQLite, error) {
+// Open opens the database, sealing request headers and site credentials with
+// sealer; a nil sealer stores them in plain text (tests only).
+func Open(path string, sealer *secrets.Sealer) (*SQLite, error) {
 	// Pragmas in the DSN apply to every connection the pool opens. WAL with
 	// synchronous=NORMAL stays durable across application crashes; only an OS
 	// crash can lose the last transactions, which a resume re-downloads.
@@ -32,12 +38,12 @@ func Open(path string) (*SQLite, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &SQLite{db: db}, nil
+	return &SQLite{db: db, sealer: sealer}, nil
 }
 
-func migrate(db *sql.DB) error {
-	const schema = `
-CREATE TABLE IF NOT EXISTS downloads (
+// migrations run in order; PRAGMA user_version records how many have run.
+var migrations = []string{
+	`CREATE TABLE IF NOT EXISTS downloads (
     id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
     destination TEXT NOT NULL,
@@ -48,9 +54,40 @@ CREATE TABLE IF NOT EXISTS downloads (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS downloads_created_at ON downloads(created_at, id);`
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("migrate SQLite database: %w", err)
+CREATE INDEX IF NOT EXISTS downloads_created_at ON downloads(created_at, id);`,
+	`ALTER TABLE downloads ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE downloads ADD COLUMN connections INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE downloads ADD COLUMN speed_limit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE downloads ADD COLUMN checksum TEXT NOT NULL DEFAULT '';
+ALTER TABLE downloads ADD COLUMN headers TEXT NOT NULL DEFAULT '';
+CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL);`,
+	`ALTER TABLE settings ADD COLUMN secrets TEXT NOT NULL DEFAULT '';`,
+}
+
+func migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if version > len(migrations) {
+		return fmt.Errorf("database schema version %d is newer than this godl (%d)", version, len(migrations))
+	}
+	for i := version; i < len(migrations); i++ {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("migrate SQLite database: %w", err)
+		}
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migrate SQLite database to version %d: %w", i+1, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record schema version %d: %w", i+1, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("migrate SQLite database to version %d: %w", i+1, err)
+		}
 	}
 	return nil
 }
@@ -63,11 +100,15 @@ func (s *SQLite) Close() error {
 }
 
 func (s *SQLite) Create(ctx context.Context, item download.Item) error {
-	const query = `INSERT INTO downloads
-(id, url, destination, status, completed, total, error, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, item.ID, item.URL, item.Destination, item.Status,
-		item.Completed, item.Total, item.Error, item.CreatedAt.Format(time.RFC3339Nano), item.UpdatedAt.Format(time.RFC3339Nano))
+	headers, err := s.encodeHeaders(item.Headers)
+	if err != nil {
+		return err
+	}
+	const query = `INSERT INTO downloads (id, url, destination, status, completed, total, error, priority, connections, speed_limit, checksum, headers, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = s.db.ExecContext(ctx, query, item.ID, item.URL, item.Destination, item.Status,
+		item.Completed, item.Total, item.Error, item.Priority, item.Connections, item.SpeedLimit, item.Checksum, headers,
+		item.CreatedAt.Format(time.RFC3339Nano), item.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("create download %s: %w", item.ID, err)
 	}
@@ -75,9 +116,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 }
 
 func (s *SQLite) Get(ctx context.Context, id string) (download.Item, error) {
-	const query = `SELECT id, url, destination, status, completed, total, error, created_at, updated_at
+	const query = `SELECT id, url, destination, status, completed, total, error, priority, connections, speed_limit, checksum, headers, created_at, updated_at
 FROM downloads WHERE id = ?`
-	item, err := scanItem(s.db.QueryRowContext(ctx, query, id))
+	item, err := s.scanItem(s.db.QueryRowContext(ctx, query, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return download.Item{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
@@ -88,7 +129,7 @@ FROM downloads WHERE id = ?`
 }
 
 func (s *SQLite) List(ctx context.Context) ([]download.Item, error) {
-	const query = `SELECT id, url, destination, status, completed, total, error, created_at, updated_at
+	const query = `SELECT id, url, destination, status, completed, total, error, priority, connections, speed_limit, checksum, headers, created_at, updated_at
 FROM downloads ORDER BY created_at, id`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -98,7 +139,7 @@ FROM downloads ORDER BY created_at, id`
 
 	items := make([]download.Item, 0)
 	for rows.Next() {
-		item, err := scanItem(rows)
+		item, err := s.scanItem(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan download: %w", err)
 		}
@@ -111,9 +152,15 @@ FROM downloads ORDER BY created_at, id`
 }
 
 func (s *SQLite) Update(ctx context.Context, item download.Item) error {
-	const query = `UPDATE downloads SET url = ?, destination = ?, status = ?, completed = ?, total = ?, error = ?, updated_at = ? WHERE id = ?`
+	headers, err := s.encodeHeaders(item.Headers)
+	if err != nil {
+		return err
+	}
+	const query = `UPDATE downloads SET url = ?, destination = ?, status = ?, completed = ?, total = ?, error = ?,
+priority = ?, connections = ?, speed_limit = ?, checksum = ?, headers = ?, updated_at = ? WHERE id = ?`
 	result, err := s.db.ExecContext(ctx, query, item.URL, item.Destination, item.Status, item.Completed,
-		item.Total, item.Error, item.UpdatedAt.Format(time.RFC3339Nano), item.ID)
+		item.Total, item.Error, item.Priority, item.Connections, item.SpeedLimit, item.Checksum, headers,
+		item.UpdatedAt.Format(time.RFC3339Nano), item.ID)
 	if err != nil {
 		return fmt.Errorf("update download %s: %w", item.ID, err)
 	}
@@ -154,14 +201,18 @@ type scanner interface {
 	Scan(...any) error
 }
 
-func scanItem(row scanner) (download.Item, error) {
+func (s *SQLite) scanItem(row scanner) (download.Item, error) {
 	var item download.Item
-	var createdAt, updatedAt string
+	var headers, createdAt, updatedAt string
 	if err := row.Scan(&item.ID, &item.URL, &item.Destination, &item.Status, &item.Completed,
-		&item.Total, &item.Error, &createdAt, &updatedAt); err != nil {
+		&item.Total, &item.Error, &item.Priority, &item.Connections, &item.SpeedLimit, &item.Checksum, &headers,
+		&createdAt, &updatedAt); err != nil {
 		return download.Item{}, err
 	}
 	var err error
+	if item.Headers, err = s.decodeHeaders(headers); err != nil {
+		return download.Item{}, err
+	}
 	item.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
 		return download.Item{}, fmt.Errorf("parse created_at: %w", err)
@@ -171,4 +222,115 @@ func scanItem(row scanner) (download.Item, error) {
 		return download.Item{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 	return item, nil
+}
+
+func (s *SQLite) seal(plain string) (string, error) {
+	if s.sealer == nil {
+		return plain, nil
+	}
+	return s.sealer.Seal(plain)
+}
+
+// open reverses seal. A value sealed under a key that is gone, as after a
+// restart without an OS keyring, reads as empty: the download then asks for
+// its credentials again (DESIGN.md 7).
+func (s *SQLite) open(value string) (string, error) {
+	if s.sealer == nil || value == "" {
+		return value, nil
+	}
+	plain, err := s.sealer.Open(value)
+	if errors.Is(err, secrets.ErrUnreadable) {
+		return "", nil
+	}
+	return plain, err
+}
+
+// encodeHeaders stores request headers as sealed JSON.
+func (s *SQLite) encodeHeaders(h map[string]string) (string, error) {
+	if len(h) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(h)
+	if err != nil {
+		return "", err
+	}
+	return s.seal(string(data))
+}
+
+func (s *SQLite) decodeHeaders(value string) (map[string]string, error) {
+	plain, err := s.open(value)
+	if err != nil || plain == "" {
+		return nil, err
+	}
+	var h map[string]string
+	if err := json.Unmarshal([]byte(plain), &h); err != nil {
+		return nil, fmt.Errorf("parse headers: %w", err)
+	}
+	return h, nil
+}
+
+// siteSecret is the sealed part of a site entry.
+type siteSecret struct {
+	Headers  map[string]string `json:"headers,omitempty"`
+	Password string            `json:"password,omitempty"`
+}
+
+func (s *SQLite) LoadSettings(ctx context.Context) (settings.Settings, bool, error) {
+	var value, sealed string
+	err := s.db.QueryRowContext(ctx, `SELECT value, secrets FROM settings WHERE id = 1`).Scan(&value, &sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return settings.Settings{}, false, nil
+	}
+	if err != nil {
+		return settings.Settings{}, false, fmt.Errorf("load settings: %w", err)
+	}
+	// Start from the defaults so fields added later get sensible values.
+	out := settings.Default()
+	if err := json.Unmarshal([]byte(value), &out); err != nil {
+		return settings.Settings{}, false, fmt.Errorf("parse settings: %w", err)
+	}
+	plain, err := s.open(sealed)
+	if err != nil {
+		return settings.Settings{}, false, err
+	}
+	if plain != "" {
+		var bySite []siteSecret
+		if err := json.Unmarshal([]byte(plain), &bySite); err != nil {
+			return settings.Settings{}, false, fmt.Errorf("parse site secrets: %w", err)
+		}
+		for i := range out.Sites {
+			if i < len(bySite) {
+				out.Sites[i].Headers, out.Sites[i].Password = bySite[i].Headers, bySite[i].Password
+			}
+		}
+	}
+	return out, true, nil
+}
+
+// SaveSettings stores the settings with site headers and passwords sealed
+// apart from the readable document.
+func (s *SQLite) SaveSettings(ctx context.Context, value settings.Settings) error {
+	value.Sites = append([]settings.Site(nil), value.Sites...)
+	bySite := make([]siteSecret, len(value.Sites))
+	for i := range value.Sites {
+		bySite[i] = siteSecret{Headers: value.Sites[i].Headers, Password: value.Sites[i].Password}
+		value.Sites[i].Headers, value.Sites[i].Password = nil, ""
+	}
+	doc, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	secretJSON, err := json.Marshal(bySite)
+	if err != nil {
+		return err
+	}
+	sealed, err := s.seal(string(secretJSON))
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO settings (id, value, secrets) VALUES (1, ?, ?)
+ON CONFLICT(id) DO UPDATE SET value = excluded.value, secrets = excluded.secrets`, string(doc), sealed); err != nil {
+		return fmt.Errorf("save settings: %w", err)
+	}
+	return nil
 }

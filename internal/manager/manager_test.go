@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,13 +16,15 @@ import (
 
 	"github.com/zichuanxu/godl/internal/download"
 	"github.com/zichuanxu/godl/internal/manager"
+	"github.com/zichuanxu/godl/internal/settings"
 )
 
-var errNotFound = errors.New("not found")
+var errNotFound = download.ErrNotFound
 
 type memoryRepository struct {
 	mu         sync.Mutex
 	items      map[string]download.Item
+	settings   *settings.Settings
 	failUpdate bool
 	updates    atomic.Int64
 }
@@ -94,6 +97,22 @@ func (r *memoryRepository) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *memoryRepository) LoadSettings(context.Context) (settings.Settings, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.settings == nil {
+		return settings.Settings{}, false, nil
+	}
+	return *r.settings, true, nil
+}
+
+func (r *memoryRepository) SaveSettings(_ context.Context, s settings.Settings) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.settings = &s
+	return nil
+}
+
 func (r *memoryRepository) get(t *testing.T, id string) download.Item {
 	t.Helper()
 	item, err := r.Get(context.Background(), id)
@@ -105,11 +124,20 @@ func (r *memoryRepository) get(t *testing.T, id string) download.Item {
 
 type funcRunner struct {
 	download  func(ctx context.Context, progress func(download.Progress)) error
+	remote    download.Remote
 	mu        sync.Mutex
 	discarded []string
+	specs     []download.Spec
 }
 
-func (r *funcRunner) Download(ctx context.Context, _, _ string, progress func(download.Progress)) error {
+func (r *funcRunner) Inspect(context.Context, string, http.Header) (download.Remote, error) {
+	return r.remote, nil
+}
+
+func (r *funcRunner) Download(ctx context.Context, spec download.Spec, progress func(download.Progress)) error {
+	r.mu.Lock()
+	r.specs = append(r.specs, spec)
+	r.mu.Unlock()
 	return r.download(ctx, progress)
 }
 
@@ -122,8 +150,10 @@ func (r *funcRunner) Discard(destination string) error {
 
 func newManager(t *testing.T, repo download.Repository, runner download.Runner, root string, publish func(download.Event)) (*manager.Manager, context.CancelFunc, <-chan struct{}) {
 	t.Helper()
+	defaults := settings.Default()
+	defaults.MaxConcurrent = 1
 	m, err := manager.New(repo, runner, manager.Options{
-		MaxConcurrent: 1,
+		Defaults:      defaults,
 		Publish:       publish,
 		DownloadRoots: []string{root},
 		FlushInterval: time.Hour,
@@ -174,7 +204,7 @@ func TestManagerQueuesRunsPublishesAndPauses(t *testing.T) {
 	events := make(chan download.Event, 16)
 	m, _, _ := newManager(t, repo, runner, root, func(event download.Event) { events <- event })
 
-	item, err := m.Add(context.Background(), "https://example.com/file.bin", filepath.Join(root, "file.bin"))
+	item, err := m.Add(context.Background(), download.Request{URL: "https://example.com/file.bin", Destination: filepath.Join(root, "file.bin")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +316,7 @@ func TestManagerFailedDownloadCanBeRetried(t *testing.T) {
 	}}
 	repo := newMemoryRepository()
 	m, _, _ := newManager(t, repo, runner, root, nil)
-	item, err := m.Add(context.Background(), "https://example.com/f", filepath.Join(root, "f"))
+	item, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Destination: filepath.Join(root, "f")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +386,7 @@ func TestManagerDeleteRejectsActiveDownload(t *testing.T) {
 	}}
 	repo := newMemoryRepository()
 	m, _, _ := newManager(t, repo, runner, root, nil)
-	item, err := m.Add(context.Background(), "https://example.com/f", filepath.Join(root, "f"))
+	item, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Destination: filepath.Join(root, "f")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +411,7 @@ func TestManagerConfinesDestinations(t *testing.T) {
 	}}
 	m, _, _ := newManager(t, newMemoryRepository(), runner, root, nil)
 	add := func(dest string) error {
-		_, err := m.Add(context.Background(), "https://example.com/f", dest)
+		_, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Destination: dest})
 		return err
 	}
 
@@ -398,10 +428,10 @@ func TestManagerConfinesDestinations(t *testing.T) {
 			t.Errorf("%s: destination %q accepted", name, dest)
 		}
 	}
-	if err := add(""); err == nil {
-		t.Error("empty destination accepted")
+	if _, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Directory: outside}); err == nil {
+		t.Error("directory outside the root accepted")
 	}
-	if _, err := m.Add(context.Background(), "file:///etc/passwd", filepath.Join(root, "p")); err == nil {
+	if _, err := m.Add(context.Background(), download.Request{URL: "file:///etc/passwd", Destination: filepath.Join(root, "p")}); err == nil {
 		t.Error("non-HTTP URL accepted")
 	}
 
@@ -445,7 +475,7 @@ func TestManagerPauseRacingCompletionKeepsTheFinishedDownload(t *testing.T) {
 	}}
 	repo := newMemoryRepository()
 	m, _, _ := newManager(t, repo, runner, root, nil)
-	item, err := m.Add(context.Background(), "https://example.com/f", filepath.Join(root, "f"))
+	item, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Destination: filepath.Join(root, "f")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,10 +497,10 @@ func TestManagerRejectsASecondDownloadToTheSameDestination(t *testing.T) {
 	}}
 	m, _, _ := newManager(t, newMemoryRepository(), runner, root, nil)
 	dest := filepath.Join(root, "same.bin")
-	if _, err := m.Add(context.Background(), "https://example.com/a", dest); err != nil {
+	if _, err := m.Add(context.Background(), download.Request{URL: "https://example.com/a", Destination: dest}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Add(context.Background(), "https://example.com/b", dest); !errors.Is(err, download.ErrInvalidDownload) {
+	if _, err := m.Add(context.Background(), download.Request{URL: "https://example.com/b", Destination: dest}); !errors.Is(err, download.ErrInvalidDownload) {
 		t.Fatalf("second Add to the same destination = %v; want ErrInvalidDownload", err)
 	}
 }
@@ -496,7 +526,7 @@ func TestManagerRequeuesWhenTheDestinationIsBusy(t *testing.T) {
 	}}
 	repo := newMemoryRepository()
 	m, _, _ := newManager(t, repo, runner, root, nil)
-	item, err := m.Add(context.Background(), "https://example.com/f", filepath.Join(root, "f"))
+	item, err := m.Add(context.Background(), download.Request{URL: "https://example.com/f", Destination: filepath.Join(root, "f")})
 	if err != nil {
 		t.Fatal(err)
 	}

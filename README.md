@@ -7,7 +7,9 @@
 
 The engine splits a download across up to 32 HTTP/1.1 connections and rebalances them continuously: when a connection finishes, it takes over half of the largest remaining range, and connections far slower than the rest are replaced. Progress is checkpointed at byte granularity, so an interrupted download resumes where it stopped, even after a crash. Responses are validated against the probed ETag or Last-Modified, `Content-Range`, and size, and an optional checksum is verified before the file is committed atomically.
 
-The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M1 (engine)**; scheduler features (M2) and the desktop GUI (M3) are not shipped yet.
+The service queue orders downloads by priority, shares a per-host connection cap across downloads, applies global and per-download speed limits (including time-of-day rules and a queue window), names files from the server, and connects through a manual or the system proxy.
+
+The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M2 (manager and network)**; the desktop GUI (M3) is not shipped yet.
 
 ## Requirements
 
@@ -53,6 +55,8 @@ The `download` command runs the engine without the service:
 | `--checksum` | none | `algo:hex` with `sha256`, `sha512`, `sha1`, or `md5`. |
 | `--resume-key` | the URL | Stable identity for expiring signed URLs. |
 | `--header` | none | Extra request header; repeatable. |
+| `--speed-limit` | `0` | Bytes per second, with `K`, `M`, or `G`; `0` is unlimited. |
+| `--proxy` | `system` | `system`, `none`, or a `http://`, `https://`, or `socks5://` proxy URL. |
 | `--overwrite` | off | Replace an existing destination. |
 
 ```bash
@@ -76,8 +80,7 @@ When parallel download and resume apply:
 ```bash
 ./godl service \
   --listen 127.0.0.1:51000 \
-  --download-root "$HOME/Downloads" \
-  --max-concurrent 3
+  --download-root "$HOME/Downloads"
 ```
 
 | Flag | Default | Meaning |
@@ -85,7 +88,6 @@ When parallel download and resume apply:
 | `--listen` | `127.0.0.1:51000` | Loopback address; non-loopback addresses are rejected. |
 | `--database` | `<config dir>/godl/godl.db` | SQLite queue. |
 | `--download-root` | `~/Downloads` | Directory downloads may be written under. Repeatable. |
-| `--max-concurrent` | `3` | Active downloads. |
 | `--log-level` | `info` | JSON logs on stderr: `debug`, `info`, `warn`, `error`. |
 | `--token-file` | `<config dir>/godl/token` | API token, created on first start with owner-only permissions. |
 
@@ -94,15 +96,60 @@ When parallel download and resume apply:
 Client commands read the same token file and talk to `http://127.0.0.1:51000` unless `--address` or `--token-file` say otherwise:
 
 ```bash
-./godl add 'https://example.com/file.bin' ~/Downloads/file.bin
+./godl add 'https://example.com/file.bin'                 # named by the server
+./godl add 'https://example.com/file.bin' ~/Downloads/f.bin --priority high --speed-limit 2M
+./godl add URL --dir ~/Downloads/isos --connections 16 --header 'Cookie: session=...'
 ./godl list
+./godl set <id> --priority low --speed-limit 0
 ./godl pause <id>
 ./godl resume <id>
 ./godl retry <id>
 ./godl delete <id> --files
+./godl settings get > settings.json
+./godl settings set settings.json
 ```
 
-Relative `OUTPUT` paths are resolved against the client's working directory. On restart, the service resumes downloads that were running when it stopped, including after a crash.
+Without `OUTPUT`, the file name comes from `Content-Disposition` (including RFC 5987 `filename*`), then the URL path, then the host. It is sanitized (no path separators, `..`, control characters, or Windows reserved names; at most 200 bytes) and placed in `--dir`, or in a category folder under the first download root: `Video`, `Music`, `Documents`, `Compressed`, or `Programs` by extension, the root itself otherwise. A name that is taken on disk or by another queued download becomes `name (1).ext`.
+
+Relative paths are resolved against the client's working directory. On restart, the service resumes downloads that were running when it stopped, including after a crash.
+
+### Settings
+
+`godl settings set` replaces the whole document, so edit the output of `settings get`:
+
+```json
+{
+  "maxConcurrent": 3,
+  "connections": 8,
+  "hostConnections": 16,
+  "speedLimit": 0,
+  "schedule": {
+    "start": "01:00",
+    "stop": "07:00",
+    "speedRules": [{ "from": "09:00", "to": "18:00", "limit": 1048576 }]
+  },
+  "proxy": { "mode": "system" },
+  "sites": [
+    { "host": "example.com", "connections": 4, "hostConnections": 4,
+      "headers": { "Referer": "https://example.com/" }, "username": "me", "password": "secret" }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `maxConcurrent` | Downloads running at once, 1–64. |
+| `connections` | Default connections per download, 1–32. |
+| `hostConnections` | Connections to one host across all downloads, 1–64. A download takes what its host has left; with none left it waits. |
+| `speedLimit` | Global cap in bytes per second; `0` is unlimited. |
+| `schedule.start`, `schedule.stop` | Local `HH:MM` window in which the queue runs, wrapping past midnight. Outside it running downloads return to the queue. Leave both empty to run all day. |
+| `schedule.speedRules` | Time-of-day global limits; the first matching rule wins over `speedLimit`. |
+| `proxy.mode` | `system` (macOS and Windows settings, else `HTTP_PROXY`/`HTTPS_PROXY`), `none`, or `manual` with `proxy.url`. Loopback addresses never use a proxy. |
+| `sites` | Overrides for a host and its subdomains: connections, host cap, extra headers, and basic-auth credentials. |
+
+Per-download priority, connections, and speed limit come from `add` or `set`; a new speed limit applies to a running download at once. Site passwords are shown as `********` by `settings get`; sending that value back keeps the stored password.
+
+Download headers (such as cookies) and site credentials are encrypted in the database with AES-GCM under a key kept in the OS keyring (Keychain, Windows Credential Manager, or the Secret Service). Without a keyring, as on a headless server, the key lives in memory only: after a restart those values are gone and a download that needs them fails with 401 or 403 until its headers are supplied again.
 
 ## HTTP API
 
@@ -112,11 +159,14 @@ Every endpoint except `/v1/ping` requires `Authorization: Bearer <token>`. Comma
 | --- | --- | --- |
 | `GET` | `/v1/ping` | `{"status":"ok"}` |
 | `GET` | `/v1/downloads` | Lists downloads with live progress. |
-| `POST` | `/v1/downloads` | Body `{"url":"...","destination":"/absolute/path"}`; returns `202` with the queued item. |
+| `POST` | `/v1/downloads` | Body `{"url":"...","destination":"/absolute/path"}`, or `"directory"` or neither for a server-named file; optional `priority` (`-1`, `0`, `1`), `connections`, `speedLimit`, `checksum`, `headers`. Returns `202` with the queued item. |
 | `POST` | `/v1/downloads/{id}:pause` | Pauses a queued or running download. `204` |
 | `POST` | `/v1/downloads/{id}:resume` | Requeues a paused download. `204` |
 | `POST` | `/v1/downloads/{id}:retry` | Requeues a failed download. `204` |
+| `PATCH` | `/v1/downloads/{id}` | Body with any of `priority`, `connections`, `speedLimit`. `204` |
 | `DELETE` | `/v1/downloads/{id}` | Deletes a stopped download; `?files=true` also removes partial data and, for completed downloads, the file. `204` |
+| `GET` | `/v1/settings` | The settings document. |
+| `PUT` | `/v1/settings` | Replaces the settings; returns them, or `422` with every validation error. |
 | `GET` | `/v1/events` | `text/event-stream`; also accepts `?token=` because `EventSource` cannot send headers. |
 
 Errors use `{"error":{"code":"...","message":"..."}}`: `404` for an unknown ID, `409` for a command the current status forbids (for example pausing a completed download, or deleting one that is still stopping), and `422` for an invalid URL, a destination outside the download roots, or a destination another download already uses.
@@ -144,13 +194,16 @@ The React queue table in `app/frontend` predates these rules and cannot talk to 
 ## Repository layout
 
 ```text
-cmd/godl/             Cobra CLI: service, add, list, pause, resume, retry, delete, download, version
+cmd/godl/             Cobra CLI: service, add, list, set, pause, resume, retry, delete, settings, download, version
 internal/download/    Shared queue model, errors, and event contract
 internal/engine/      Download engine: work-stealing ranges, checkpoints, validation
 internal/filelock/    OS advisory file locks
 internal/logging/     slog setup and URL redaction
 internal/store/       SQLite persistence
-internal/manager/     Queue lifecycle, recovery, destination confinement, unwired M2 pieces
+internal/manager/     Queue, priorities, host caps, limits, schedule, naming, confinement
+internal/settings/    Settings document and schedule rules
+internal/netproxy/    Manual and system proxy selection
+internal/hls/         HLS playlists, AES-128, and segment concatenation (wired in M5)
 internal/api/         Authenticated loopback JSON and SSE API
 internal/client/      Service client
 internal/service/     Service composition, lifecycle, paths, and token

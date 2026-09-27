@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/zichuanxu/godl/internal/download"
 )
 
 func TestRunnerDownloadsWithDynamicRanges(t *testing.T) {
@@ -51,7 +53,7 @@ func TestRunnerDownloadsWithDynamicRanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(t.TempDir(), "runner.bin")
-	if err := runner.Download(context.Background(), server.URL, dest, nil); err != nil {
+	if err := runner.Download(context.Background(), download.Spec{URL: server.URL, Destination: dest}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(dest)
