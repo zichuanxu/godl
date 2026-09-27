@@ -5,7 +5,7 @@ A fast download manager for macOS, Windows, and Linux, written in Go: a desktop 
 - Up to 32 connections per download, rebalanced as they finish; byte-level resume, even after a crash.
 - Queue with priorities, per-host connection caps, speed limits, and a schedule.
 - HLS (`.m3u8`, AES-128) to one `.ts` file, optional MP4 conversion with ffmpeg.
-- Desktop app: tray icon, notifications, drag and drop, cURL import, clipboard monitor, batch URLs, sleep or shut down when done.
+- Desktop app: tray icon, notifications, drag and drop, cURL import, clipboard monitor, batch URLs, sleep or shut down when done; English and Simplified Chinese, light and dark themes.
 
 ## Install
 

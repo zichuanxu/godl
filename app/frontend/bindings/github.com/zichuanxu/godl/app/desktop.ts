@@ -169,6 +169,14 @@ export function SetAutostart(enabled: boolean): $CancellablePromise<void> {
 }
 
 /**
+ * SetLocale tells the backend the language the frontend resolved, so the tray
+ * menu and notifications match it.
+ */
+export function SetLocale(tag: string): $CancellablePromise<void> {
+    return $Call.ByID(2694459158, tag);
+}
+
+/**
  * SetWhenDone chooses what happens once no download is queued or running:
  * "" for nothing, "sleep", or "shutdown". It fires once and then resets.
  */

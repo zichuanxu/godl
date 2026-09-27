@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import { ArrowDownToLine, ChevronRight, CircleAlert, Cookie, Folder, Layers, Link2, X } from "lucide-react";
 import { Desktop, Request, message } from "./api";
-import { joinPath, looksLikeCurl, looksLikeURL, parseSpeed } from "./format";
+import { baseName, joinPath, looksLikeCurl, looksLikeURL, parseSpeed } from "./format";
+import { useI18n } from "./i18n";
+import { Field, Modal, Segmented } from "./ui";
 
 export type AddPrefill = { text?: string };
 
@@ -21,6 +24,7 @@ type Props = {
 
 /** AddDialog queues one download per URL line, or one from a cURL command. */
 export default function AddDialog({ prefill, defaultDirectory, onClose, onError }: Props) {
+  const { t } = useI18n();
   const [text, setText] = useState(prefill.text ?? "");
   const [headers, setHeaders] = useState<Record<string, string>>({});
   // Imported headers (cookies) are sent only to the host they came from.
@@ -31,6 +35,7 @@ export default function AddDialog({ prefill, defaultDirectory, onClose, onError 
   const [connections, setConnections] = useState("");
   const [limit, setLimit] = useState("");
   const [checksum, setChecksum] = useState("");
+  const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -118,71 +123,126 @@ export default function AddDialog({ prefill, defaultDirectory, onClose, onError 
 
   const headerCount = Object.keys(headers).length;
   const otherHosts = headerCount > 0 && urls.some((u) => hostOf(u) !== headerHost);
+  const optionsSet = priority !== 0 || !!connections || !!limit || !!checksum;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add download</h2>
-        <label>
-          URLs, one per line, a batch pattern such as img[001-120].jpg, or a “Copy as cURL” command
-          <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="https://example.com/file.zip" autoFocus />
-        </label>
-        {batchError && <p className="error">Batch pattern: {batchError}</p>}
-        {expanded && (
-          <p className="note">
-            Batch pattern: {expanded.length} URLs, from {expanded[0]} to {expanded[expanded.length - 1]}.
-          </p>
-        )}
-        {headerCount > 0 && (
-          <p className="note">
-            Imported {headerCount} request header{headerCount > 1 ? "s" : ""} ({Object.keys(headers).join(", ")}) for {headerHost}
-            {otherHosts ? "; URLs on other hosts are added without them" : ""}.{" "}
-            <button className="link" onClick={() => setHeaders({})}>Remove</button>
-          </p>
-        )}
-        <div className="row">
-          <label className="grow">
-            Folder
-            <input readOnly value={directory || "Category folder in " + defaultDirectory} />
-          </label>
-          <button onClick={pick}>Choose…</button>
-          {directory && <button onClick={() => setDirectory("")}>Reset</button>}
-        </div>
-        {urls.length <= 1 && (
-          <label>
-            File name (optional; the server's name is used otherwise)
-            <input value={fileName} onChange={(e) => setFileName(e.target.value)} />
-          </label>
-        )}
-        <div className="row">
-          <label>
-            Priority
-            <select value={priority} onChange={(e) => setPriority(parseInt(e.target.value, 10))}>
-              <option value={1}>High</option>
-              <option value={0}>Normal</option>
-              <option value={-1}>Low</option>
-            </select>
-          </label>
-          <label>
-            Connections
-            <input type="number" min={1} max={32} placeholder="default" value={connections} onChange={(e) => setConnections(e.target.value)} />
-          </label>
-          <label>
-            Speed limit
-            <input placeholder="none, or 2M" value={limit} onChange={(e) => setLimit(e.target.value)} />
-          </label>
-        </div>
-        <label>
-          Checksum (optional)
-          <input placeholder="sha256:…" value={checksum} onChange={(e) => setChecksum(e.target.value)} />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <div className="actions">
-          <button onClick={onClose}>Cancel</button>
+    <Modal
+      icon={ArrowDownToLine}
+      title={t("add.title")}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose}>{t("common.cancel")}</button>
           <button className="primary" disabled={!valid || busy} onClick={submit}>
-            {urls.length > 1 ? `Add ${urls.length} downloads` : "Download"}
+            <ArrowDownToLine size={14} />
+            {urls.length > 1 ? t("add.submitMany", { n: urls.length }) : t("add.submit")}
+          </button>
+        </>
+      }
+    >
+      <Field label={t("add.urls")} hint={t("add.urlsHint")}>
+        <div className="input-icon top">
+          <Link2 size={15} />
+          <textarea
+            className="urls"
+            rows={3}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && valid && !busy) submit();
+            }}
+            placeholder="https://example.com/file.zip"
+            autoFocus
+            spellCheck={false}
+          />
+        </div>
+      </Field>
+
+      {batchError && (
+        <div className="chip danger">
+          <CircleAlert size={14} />
+          {t("add.batchError", { error: batchError })}
+        </div>
+      )}
+      {expanded && expanded.length > 0 && (
+        <div className="chip">
+          <Layers size={14} />
+          <span className="ellipsis">{t("add.batch", { n: expanded.length, first: baseName(expanded[0]), last: baseName(expanded[expanded.length - 1]) })}</span>
+        </div>
+      )}
+      {headerCount > 0 && (
+        <div className="chip">
+          <Cookie size={14} />
+          <span className="grow ellipsis" title={Object.keys(headers).join(", ")}>
+            {headerCount === 1 ? t("add.headers1", { host: headerHost }) : t("add.headers", { n: headerCount, host: headerHost })}
+            {otherHosts ? ` ${t("add.headersOther")}` : ""}
+          </span>
+          <button className="icon ghost tiny" onClick={() => setHeaders({})} title={t("common.remove")} aria-label={t("common.remove")}>
+            <X size={12} />
           </button>
         </div>
-      </div>
-    </div>
+      )}
+
+      <Field label={t("add.saveTo")} plain>
+        <div className="folder-picker">
+          <Folder size={15} />
+          <span className={`grow ellipsis ${directory ? "" : "muted"}`} title={directory || defaultDirectory}>
+            {directory || t("add.categoryFolder", { dir: defaultDirectory })}
+          </span>
+          {directory && (
+            <button className="small ghost" onClick={() => setDirectory("")}>
+              {t("add.reset")}
+            </button>
+          )}
+          <button className="small" onClick={pick}>
+            {t("add.choose")}
+          </button>
+        </div>
+      </Field>
+
+      {urls.length <= 1 && (
+        <Field label={t("add.fileName")}>
+          <input value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder={t("add.fileNameHint")} spellCheck={false} />
+        </Field>
+      )}
+
+      <button className={`disclosure ${showOptions ? "open" : ""}`} onClick={() => setShowOptions(!showOptions)}>
+        <ChevronRight size={14} />
+        {t("add.options")}
+        {optionsSet && !showOptions && <span className="dot-accent" />}
+      </button>
+      {showOptions && (
+        <div className="options">
+          <Field label={t("add.priority")} plain>
+            <Segmented
+              value={priority}
+              onChange={setPriority}
+              options={[
+                { value: -1, label: t("priority.low") },
+                { value: 0, label: t("priority.normal") },
+                { value: 1, label: t("priority.high") },
+              ]}
+            />
+          </Field>
+          <div className="grid2">
+            <Field label={t("add.connections")}>
+              <input type="number" min={1} max={32} placeholder={t("add.default")} value={connections} onChange={(e) => setConnections(e.target.value)} />
+            </Field>
+            <Field label={t("add.speedLimit")}>
+              <input placeholder={t("add.speedHint")} value={limit} onChange={(e) => setLimit(e.target.value)} />
+            </Field>
+          </div>
+          <Field label={t("add.checksum")}>
+            <input className="mono" placeholder="sha256:…" value={checksum} onChange={(e) => setChecksum(e.target.value)} spellCheck={false} />
+          </Field>
+        </div>
+      )}
+
+      {error && (
+        <p className="form-error">
+          <CircleAlert size={14} />
+          {error}
+        </p>
+      )}
+    </Modal>
   );
 }

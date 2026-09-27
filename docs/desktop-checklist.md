@@ -12,12 +12,15 @@ from a clean data directory (`~/Library/Application Support/godl` or
 - [ ] Closing the window hides it; downloads continue. The tray (menu bar) icon shows it again.
 - [ ] Tray menu: Pause all, Resume all, and Quit work. Quit lets running downloads checkpoint; the next start resumes them.
 - [ ] On macOS, clicking the Dock icon with the window hidden shows it.
+- [ ] On macOS the sidebar is translucent and the window can be dragged by the header and the sidebar top; buttons and the search box there still respond to clicks.
+- [ ] Settings → General → Language: English and 简体中文 switch every label, the tray menu, and notifications; "System" follows the OS language.
+- [ ] Settings → General → Appearance: System, Light, and Dark apply at once and survive a restart.
 
 ## Adding downloads
 
 - [ ] Add a URL: the file name comes from the server and lands in the category folder (for example `Downloads/Documents`).
 - [ ] Add two URLs at once (one per line): both are queued.
-- [ ] Choose a folder: the download goes there; the folder is listed under Settings → Desktop.
+- [ ] Choose a folder: the download goes there; the folder is listed under Settings → Advanced.
 - [ ] Give a file name: it is used as is.
 - [ ] Drag a link from a browser onto the window: the add dialog opens with the URL.
 - [ ] Paste a browser "Copy as cURL" command (bash and cmd variants): the URL and the cookie/referer headers are imported.
@@ -25,7 +28,10 @@ from a clean data directory (`~/Library/Application Support/godl` or
 
 ## Queue
 
-- [ ] Progress bar, speed, time left, and the status bar sparkline update while downloading.
+- [ ] Progress bar, speed, time left, and the sidebar speed card update while downloading.
+- [ ] Sidebar filters (Active, Paused, Completed, Failed) and their counts match the list; search filters by name and URL.
+- [ ] Hovering a row shows its quick actions; right-click and the ⋯ button open the same actions menu.
+- [ ] Keyboard: ⌘/Ctrl+N new download, ⌘/Ctrl+, settings, ⌘/Ctrl+F search, arrows select, Space pauses or resumes, Enter opens, Delete asks to delete, Esc closes dialogs.
 - [ ] Pause, Resume, Retry, and Delete (with and without "also delete the file") behave as labelled.
 - [ ] Open launches a completed file; Show in folder reveals it in Finder or Explorer.
 - [ ] A download that fails with 401 or 403 offers Re-authenticate; pasting a fresh cURL command retries it.

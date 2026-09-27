@@ -67,6 +67,9 @@ type Desktop struct {
 	whenDone atomic.Value
 	// newer is the newest release, when it is newer than this build.
 	newer atomic.Pointer[update.Release]
+	// locale is the frontend's language (a string); tray is relabelled with it.
+	locale atomic.Value
+	tray   []trayItem
 }
 
 // State describes the backend to the frontend.
@@ -304,7 +307,7 @@ func (d *Desktop) PickDirectory() (string, error) {
 		return "", err
 	}
 	dir, err := d.app.Dialog.OpenFile().
-		SetTitle("Choose a download folder").
+		SetTitle(d.tr("Choose a download folder")).
 		CanChooseDirectories(true).
 		CanChooseFiles(false).
 		CanCreateDirectories(true).
@@ -407,9 +410,9 @@ func (d *Desktop) notifyLoop() {
 		var title string
 		switch item.Status {
 		case download.StatusCompleted:
-			title = "Download complete"
+			title = d.tr("Download complete")
 		case download.StatusFailed:
-			title = "Download failed"
+			title = d.tr("Download failed")
 		default:
 			continue
 		}

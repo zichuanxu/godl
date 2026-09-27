@@ -38,6 +38,12 @@ export class Desktop {
      */
     "checkUpdates": boolean;
 
+    /**
+     * Language is the interface language: "en", "zh-CN", or empty for the
+     * system's.
+     */
+    "language"?: string;
+
     /** Creates a new Desktop instance. */
     constructor($$source: Partial<Desktop> = {}) {
         if (!("clipboardMonitor" in $$source)) {

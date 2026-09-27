@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,7 +52,13 @@ type Desktop struct {
 	FFmpeg string `json:"ffmpeg,omitempty"`
 	// CheckUpdates polls GitHub Releases once a week for a newer version.
 	CheckUpdates bool `json:"checkUpdates"`
+	// Language is the interface language: "en", "zh-CN", or empty for the
+	// system's.
+	Language string `json:"language,omitempty"`
 }
+
+// Languages are the interface languages the desktop app ships.
+var Languages = []string{"en", "zh-CN"}
 
 // Schedule runs the queue only between Start and Stop ("HH:MM" local time,
 // wrapping past midnight) and applies time-of-day speed limits. Empty Start and
@@ -172,6 +179,9 @@ func (s Settings) Validate() error {
 	errs = append(errs, s.Proxy.Validate())
 	for _, site := range s.Sites {
 		errs = append(errs, site.validate())
+	}
+	if s.Desktop.Language != "" && !slices.Contains(Languages, s.Desktop.Language) {
+		errs = append(errs, fmt.Errorf("language must be one of %v or empty, got %q", Languages, s.Desktop.Language))
 	}
 	for _, dir := range s.ExtraRoots {
 		if !filepath.IsAbs(dir) {

@@ -52,6 +52,7 @@ func TestValidate(t *testing.T) {
 		func(s *Settings) { s.Sites = []Site{{Host: "http://example.com"}} },
 		func(s *Settings) { s.Sites = []Site{{Host: "example.com", Connections: 99}} },
 		func(s *Settings) { s.Sites = []Site{{Host: "example.com", Headers: map[string]string{"X": "a\r\nb"}}} },
+		func(s *Settings) { s.Desktop.Language = "fr" },
 	}
 	for i, mutate := range bad {
 		s := Default()

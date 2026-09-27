@@ -1,15 +1,44 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { CircleAlert, Clock, Download, Globe, Monitor, Moon, Plus, Settings as SettingsIcon, SlidersHorizontal, Sun, Trash2, Wrench, type LucideIcon } from "lucide-react";
 import { Desktop, ProxyMode, Settings, SpeedRule, State, message } from "./api";
 import { parseSpeed, speedText } from "./format";
+import { useI18n } from "./i18n";
+import { Modal, Segmented, Switch } from "./ui";
+import { applyTheme, loadTheme, saveTheme, type Theme } from "./theme";
 
 type Props = { state: State; onClose: () => void; onSaved: () => void };
+type Tab = "general" | "downloads" | "schedule" | "network" | "advanced";
+
+const tabs: { id: Tab; icon: LucideIcon; label: "settings.general" | "settings.downloads" | "settings.schedule" | "settings.network" | "settings.advanced" }[] = [
+  { id: "general", icon: SlidersHorizontal, label: "settings.general" },
+  { id: "downloads", icon: Download, label: "settings.downloads" },
+  { id: "schedule", icon: Clock, label: "settings.schedule" },
+  { id: "network", icon: Globe, label: "settings.network" },
+  { id: "advanced", icon: Wrench, label: "settings.advanced" },
+];
+
+/** Row is one setting: a label (and hint) on the left, its control on the right. */
+function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="set-row">
+      <div className="set-text">
+        <span className="set-label">{label}</span>
+        {hint && <span className="hint">{hint}</span>}
+      </div>
+      <div className="set-control">{children}</div>
+    </div>
+  );
+}
 
 export default function SettingsDialog({ state, onClose, onSaved }: Props) {
+  const { t, setLang } = useI18n();
+  const [tab, setTab] = useState<Tab>("general");
   const [s, setS] = useState<Settings | null>(null);
   const [limit, setLimit] = useState("");
   const [rules, setRules] = useState<{ from: string; to: string; limit: string }[]>([]);
   const [sites, setSites] = useState("[]");
   const [autostart, setAutostart] = useState(state.autostart);
+  const [theme, setTheme] = useState<Theme>(loadTheme);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -23,28 +52,21 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
       .catch((err) => setError(message(err)));
   }, []);
 
-  if (!s) {
-    return (
-      <div className="modal-backdrop" onClick={onClose}>
-        <div className="modal">{error || "Loading…"}</div>
-      </div>
-    );
-  }
-
-  const set = (patch: Partial<Settings>) => setS(new Settings({ ...s, ...patch }));
-  const windowed = !!s.schedule.start;
-
   async function save() {
+    if (!s) return;
     setError("");
     try {
       const next = new Settings({
-        ...s!,
+        ...s,
         speedLimit: parseSpeed(limit),
-        schedule: { ...s!.schedule, speedRules: rules.map((r) => new SpeedRule({ from: r.from, to: r.to, limit: parseSpeed(r.limit) })) },
+        schedule: { ...s.schedule, speedRules: rules.map((r) => new SpeedRule({ from: r.from, to: r.to, limit: parseSpeed(r.limit) })) },
         sites: JSON.parse(sites),
       });
-      await Desktop.SaveSettings(next);
+      const saved = await Desktop.SaveSettings(next);
       if (autostart !== state.autostart) await Desktop.SetAutostart(autostart);
+      saveTheme(theme);
+      applyTheme(theme);
+      setLang(saved.desktop.language ?? "");
       onSaved();
       onClose();
     } catch (err) {
@@ -52,122 +74,195 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
     }
   }
 
+  const footer = (
+    <>
+      {error && (
+        <p className="form-error grow">
+          <CircleAlert size={14} />
+          <span className="ellipsis" title={error}>
+            {error}
+          </span>
+        </p>
+      )}
+      <button onClick={onClose}>{t("common.cancel")}</button>
+      <button className="primary" disabled={!s} onClick={save}>
+        {t("common.save")}
+      </button>
+    </>
+  );
+
+  if (!s) {
+    return (
+      <Modal icon={SettingsIcon} title={t("settings.title")} size="wide" onClose={onClose} footer={footer}>
+        <p className="muted">{error ? "" : t("common.loading")}</p>
+      </Modal>
+    );
+  }
+
+  const set = (patch: Partial<Settings>) => setS(new Settings({ ...s, ...patch }));
+  const desk = (patch: Partial<Settings["desktop"]>) => set({ desktop: { ...s.desktop, ...patch } });
   const num = (v: string) => (v === "" ? 0 : parseInt(v, 10));
+  const windowed = !!s.schedule.start;
+  const rule = (i: number, patch: Partial<(typeof rules)[number]>) => setRules(rules.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <h2>Settings</h2>
-        <div className="grid">
-          <fieldset>
-            <legend>Downloads</legend>
-            <label>
-              Downloads at once
-              <input type="number" min={1} max={64} value={s.maxConcurrent} onChange={(e) => set({ maxConcurrent: num(e.target.value) })} />
-            </label>
-            <label>
-              Connections per download
-              <input type="number" min={1} max={32} value={s.connections} onChange={(e) => set({ connections: num(e.target.value) })} />
-            </label>
-            <label>
-              Connections per server
-              <input type="number" min={1} max={64} value={s.hostConnections} onChange={(e) => set({ hostConnections: num(e.target.value) })} />
-            </label>
-            <label>
-              Total speed limit
-              <input placeholder="none, or 5M" value={limit} onChange={(e) => setLimit(e.target.value)} />
-            </label>
-          </fieldset>
+    <Modal icon={SettingsIcon} title={t("settings.title")} size="wide" onClose={onClose} footer={footer}>
+      <div className="settings">
+        <nav className="settings-nav">
+          {tabs.map((x) => (
+            <button key={x.id} className={`nav-item ${tab === x.id ? "on" : ""}`} onClick={() => setTab(x.id)}>
+              <x.icon size={15} />
+              {t(x.label)}
+            </button>
+          ))}
+          <div className="grow" />
+          <span className="settings-version">{t("settings.version", { version: state.version })}</span>
+        </nav>
 
-          <fieldset>
-            <legend>Schedule</legend>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={windowed}
-                onChange={(e) => set({ schedule: { ...s.schedule, start: e.target.checked ? "01:00" : "", stop: e.target.checked ? "07:00" : "" } })}
-              />
-              Run the queue only between
-            </label>
-            <div className="row">
-              <input type="time" disabled={!windowed} value={s.schedule.start ?? ""} onChange={(e) => set({ schedule: { ...s.schedule, start: e.target.value } })} />
-              <span>and</span>
-              <input type="time" disabled={!windowed} value={s.schedule.stop ?? ""} onChange={(e) => set({ schedule: { ...s.schedule, stop: e.target.value } })} />
-            </div>
-            <p className="note">Speed limits by time of day (the first match wins):</p>
-            {rules.map((r, i) => (
-              <div className="row" key={i}>
-                <input type="time" value={r.from} onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} />
-                <input type="time" value={r.to} onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))} />
-                <input placeholder="limit, e.g. 1M" value={r.limit} onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, limit: e.target.value } : x)))} />
-                <button onClick={() => setRules(rules.filter((_, j) => j !== i))}>Remove</button>
+        <div className="settings-pane">
+          {tab === "general" && (
+            <>
+              <Row label={t("settings.language")}>
+                <select value={s.desktop.language ?? ""} onChange={(e) => desk({ language: e.target.value })}>
+                  <option value="">{t("settings.languageSystem")}</option>
+                  <option value="en">English</option>
+                  <option value="zh-CN">简体中文</option>
+                </select>
+              </Row>
+              <Row label={t("settings.theme")}>
+                <Segmented
+                  value={theme}
+                  onChange={setTheme}
+                  options={[
+                    { value: "system", label: t("settings.themeSystem"), icon: Monitor },
+                    { value: "light", label: t("settings.themeLight"), icon: Sun },
+                    { value: "dark", label: t("settings.themeDark"), icon: Moon },
+                  ]}
+                />
+              </Row>
+              <div className="set-group">
+                <Switch checked={autostart} onChange={setAutostart} label={t("settings.autostart")} />
+                <Switch checked={s.desktop.notifications} onChange={(v) => desk({ notifications: v })} label={t("settings.notifications")} />
+                <Switch checked={s.desktop.clipboardMonitor} onChange={(v) => desk({ clipboardMonitor: v })} label={t("settings.clipboard")} />
+                <Switch checked={s.desktop.checkUpdates} onChange={(v) => desk({ checkUpdates: v })} label={t("settings.checkUpdates")} />
               </div>
-            ))}
-            <button onClick={() => setRules([...rules, { from: "09:00", to: "18:00", limit: "1M" }])}>Add rule</button>
-          </fieldset>
+            </>
+          )}
 
-          <fieldset>
-            <legend>Network</legend>
-            <label>
-              Proxy
-              <select value={s.proxy.mode ?? ProxyMode.ModeSystem} onChange={(e) => set({ proxy: { ...s.proxy, mode: e.target.value as ProxyMode } })}>
-                <option value={ProxyMode.ModeSystem}>System settings</option>
-                <option value={ProxyMode.ModeNone}>No proxy</option>
-                <option value={ProxyMode.ModeManual}>Manual</option>
-              </select>
-            </label>
-            {s.proxy.mode === ProxyMode.ModeManual && (
-              <label>
-                Proxy URL
-                <input placeholder="http://host:3128 or socks5://user:pass@host:1080" value={s.proxy.url ?? ""} onChange={(e) => set({ proxy: { ...s.proxy, url: e.target.value } })} />
+          {tab === "downloads" && (
+            <>
+              <Row label={t("settings.maxConcurrent")}>
+                <input type="number" min={1} max={64} value={s.maxConcurrent} onChange={(e) => set({ maxConcurrent: num(e.target.value) })} />
+              </Row>
+              <Row label={t("settings.connections")}>
+                <input type="number" min={1} max={32} value={s.connections} onChange={(e) => set({ connections: num(e.target.value) })} />
+              </Row>
+              <Row label={t("settings.hostConnections")}>
+                <input type="number" min={1} max={64} value={s.hostConnections} onChange={(e) => set({ hostConnections: num(e.target.value) })} />
+              </Row>
+              <Row label={t("settings.speedLimit")}>
+                <input placeholder={t("settings.speedHint")} value={limit} onChange={(e) => setLimit(e.target.value)} />
+              </Row>
+              <div className="set-group">
+                <Switch checked={s.desktop.askDirectory} onChange={(v) => desk({ askDirectory: v })} label={t("settings.askDirectory")} />
+                <Switch checked={s.desktop.openWhenDone} onChange={(v) => desk({ openWhenDone: v })} label={t("settings.openWhenDone")} />
+              </div>
+            </>
+          )}
+
+          {tab === "schedule" && (
+            <>
+              <div className="set-group">
+                <Switch
+                  checked={windowed}
+                  onChange={(v) => set({ schedule: { ...s.schedule, start: v ? "01:00" : "", stop: v ? "07:00" : "" } })}
+                  label={t("settings.window")}
+                  hint={t("settings.windowHint")}
+                />
+                {windowed && (
+                  <div className="time-range">
+                    <input type="time" value={s.schedule.start ?? ""} onChange={(e) => set({ schedule: { ...s.schedule, start: e.target.value } })} />
+                    <span className="muted">{t("settings.and")}</span>
+                    <input type="time" value={s.schedule.stop ?? ""} onChange={(e) => set({ schedule: { ...s.schedule, stop: e.target.value } })} />
+                  </div>
+                )}
+              </div>
+              <div className="section-head">
+                <div>
+                  <span className="set-label">{t("settings.rules")}</span>
+                  <span className="hint">{t("settings.rulesHint")}</span>
+                </div>
+                <button className="small" onClick={() => setRules([...rules, { from: "09:00", to: "18:00", limit: "1M" }])}>
+                  <Plus size={14} />
+                  {t("settings.addRule")}
+                </button>
+              </div>
+              {rules.length === 0 ? (
+                <p className="muted empty-rules">{t("settings.rulesEmpty")}</p>
+              ) : (
+                <div className="rules">
+                  {rules.map((r, i) => (
+                    <div className="rule" key={i}>
+                      <input type="time" value={r.from} onChange={(e) => rule(i, { from: e.target.value })} />
+                      <span className="muted">–</span>
+                      <input type="time" value={r.to} onChange={(e) => rule(i, { to: e.target.value })} />
+                      <input className="grow" placeholder={t("settings.ruleLimit")} value={r.limit} onChange={(e) => rule(i, { limit: e.target.value })} />
+                      <button className="icon ghost" title={t("common.remove")} aria-label={t("common.remove")} onClick={() => setRules(rules.filter((_, j) => j !== i))}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === "network" && (
+            <>
+              <Row label={t("settings.proxy")}>
+                <select value={s.proxy.mode ?? ProxyMode.ModeSystem} onChange={(e) => set({ proxy: { ...s.proxy, mode: e.target.value as ProxyMode } })}>
+                  <option value={ProxyMode.ModeSystem}>{t("settings.proxySystem")}</option>
+                  <option value={ProxyMode.ModeNone}>{t("settings.proxyNone")}</option>
+                  <option value={ProxyMode.ModeManual}>{t("settings.proxyManual")}</option>
+                </select>
+              </Row>
+              {s.proxy.mode === ProxyMode.ModeManual && (
+                <label className="field">
+                  <span className="field-label">{t("settings.proxyURL")}</span>
+                  <input className="mono" placeholder="http://host:3128 · socks5://user:pass@host:1080" value={s.proxy.url ?? ""} onChange={(e) => set({ proxy: { ...s.proxy, url: e.target.value } })} spellCheck={false} />
+                </label>
+              )}
+              <label className="field">
+                <span className="field-label">{t("settings.sites")}</span>
+                <textarea rows={9} className="mono" value={sites} onChange={(e) => setSites(e.target.value)} spellCheck={false} />
+                <span className="hint">{t("settings.sitesHint")}</span>
               </label>
-            )}
-            <label>
-              Site settings (JSON: host, connections, hostConnections, headers, username, password)
-              <textarea rows={6} className="mono" value={sites} onChange={(e) => setSites(e.target.value)} />
-            </label>
-          </fieldset>
+            </>
+          )}
 
-          <fieldset>
-            <legend>Desktop</legend>
-            <label className="check">
-              <input type="checkbox" checked={s.desktop.clipboardMonitor} onChange={(e) => set({ desktop: { ...s.desktop, clipboardMonitor: e.target.checked } })} />
-              Offer to download copied links and cURL commands
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={s.desktop.notifications} onChange={(e) => set({ desktop: { ...s.desktop, notifications: e.target.checked } })} />
-              Notify when a download finishes or fails
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={s.desktop.askDirectory} onChange={(e) => set({ desktop: { ...s.desktop, askDirectory: e.target.checked } })} />
-              Always ask where to save
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={s.desktop.openWhenDone} onChange={(e) => set({ desktop: { ...s.desktop, openWhenDone: e.target.checked } })} />
-              Open files when they finish
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={s.desktop.checkUpdates} onChange={(e) => set({ desktop: { ...s.desktop, checkUpdates: e.target.checked } })} />
-              Check GitHub for a new version once a week
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={autostart} onChange={(e) => setAutostart(e.target.checked)} />
-              Start godl when I log in
-            </label>
-            <label>
-              ffmpeg for “Convert to MP4” (empty: find it on PATH)
-              <input placeholder="/opt/homebrew/bin/ffmpeg" value={s.desktop.ffmpeg ?? ""} onChange={(e) => set({ desktop: { ...s.desktop, ffmpeg: e.target.value } })} />
-            </label>
-            {(s.extraRoots ?? []).length > 0 && (
-              <p className="note">Folders you picked: {(s.extraRoots ?? []).join(", ")}</p>
-            )}
-          </fieldset>
-        </div>
-        {error && <p className="error">{error}</p>}
-        <div className="actions">
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={save}>Save</button>
+          {tab === "advanced" && (
+            <>
+              <label className="field">
+                <span className="field-label">{t("settings.ffmpeg")}</span>
+                <input className="mono" placeholder="/opt/homebrew/bin/ffmpeg" value={s.desktop.ffmpeg ?? ""} onChange={(e) => desk({ ffmpeg: e.target.value })} spellCheck={false} />
+                <span className="hint">{t("settings.ffmpegHint")}</span>
+              </label>
+              {(s.extraRoots ?? []).length > 0 && (
+                <div className="field">
+                  <span className="field-label">{t("settings.extraRoots")}</span>
+                  <ul className="paths">
+                    {(s.extraRoots ?? []).map((p) => (
+                      <li key={p} className="mono">
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

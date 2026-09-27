@@ -1,3 +1,5 @@
+import type { T } from "./i18n";
+
 const units = ["B", "KiB", "MiB", "GiB", "TiB"];
 
 export function bytes(n: number): string {
@@ -14,15 +16,31 @@ export function speed(bps: number): string {
   return bps > 0 ? `${bytes(Math.round(bps))}/s` : "";
 }
 
-export function eta(remaining: number, bps: number): string {
+export function eta(remaining: number, bps: number, t: T): string {
   if (!(bps > 0) || !(remaining > 0)) return "";
   let s = Math.round(remaining / bps);
   const h = Math.floor(s / 3600);
   s -= h * 3600;
   const m = Math.floor(s / 60);
   s -= m * 60;
-  if (h > 99) return "> 99 h";
-  return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+  if (h > 99) return t("eta.long");
+  return h > 0 ? t("eta.h", { h, m }) : m > 0 ? t("eta.m", { m, s }) : t("eta.s", { s });
+}
+
+export type FileKind = "video" | "audio" | "archive" | "image" | "document" | "program" | "file";
+
+const kinds: [FileKind, RegExp][] = [
+  ["video", /\.(mp4|mkv|mov|avi|webm|m4v|ts|flv|wmv)$/i],
+  ["audio", /\.(mp3|flac|wav|aac|m4a|ogg|opus)$/i],
+  ["archive", /\.(zip|rar|7z|tar|gz|tgz|bz2|xz|zst|iso)$/i],
+  ["image", /\.(png|jpe?g|gif|webp|svg|bmp|heic|avif)$/i],
+  ["document", /\.(pdf|docx?|xlsx?|pptx?|txt|md|epub|csv)$/i],
+  ["program", /\.(exe|msi|dmg|pkg|deb|rpm|appimage|apk)$/i],
+];
+
+/** fileKind groups a file name by extension for its icon. */
+export function fileKind(name: string): FileKind {
+  return kinds.find(([, re]) => re.test(name))?.[0] ?? "file";
 }
 
 /** baseName handles both / and \ separators. */

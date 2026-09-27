@@ -48,7 +48,13 @@ func main() {
 	desk.app = app
 
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name: "main", Title: "godl", Width: 1100, Height: 700, MinWidth: 720, MinHeight: 440, URL: "/",
+		Name: "main", Title: "godl", Width: 1120, Height: 720, MinWidth: 820, MinHeight: 500, URL: "/",
+		// Hidden inset title bar over a translucent sidebar; the frontend
+		// marks its header as the drag region.
+		Mac: application.MacWindow{
+			TitleBar: application.MacTitleBarHiddenInset,
+			Backdrop: application.MacBackdropTranslucent,
+		},
 	})
 	desk.window = win
 	// Closing the window hides it; downloads continue until Quit.
@@ -65,12 +71,16 @@ func main() {
 	}
 	tray.SetTooltip("godl")
 	menu := app.NewMenu()
-	menu.Add("Show godl").OnClick(func(*application.Context) { desk.show() })
+	item := func(label string, fn func()) {
+		mi := menu.Add(label).OnClick(func(*application.Context) { fn() })
+		desk.tray = append(desk.tray, trayItem{item: mi, label: label})
+	}
+	item("Show godl", desk.show)
 	menu.AddSeparator()
-	menu.Add("Pause all").OnClick(func(*application.Context) { desk.PauseAll() })
-	menu.Add("Resume all").OnClick(func(*application.Context) { desk.ResumeAll() })
+	item("Pause all", func() { _ = desk.PauseAll() })
+	item("Resume all", func() { _ = desk.ResumeAll() })
 	menu.AddSeparator()
-	menu.Add("Quit godl").OnClick(func(*application.Context) { app.Quit() })
+	item("Quit godl", app.Quit)
 	tray.SetMenu(menu)
 	tray.OnClick(desk.show)
 	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { desk.show() })
