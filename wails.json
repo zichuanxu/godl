@@ -1,9 +1,0 @@
-{
-  "name": "godl",
-  "outputfilename": "godl",
-  "frontend:dir": "app/frontend",
-  "frontend:install": "npm install",
-  "frontend:build": "npm run build",
-  "frontend:dev": "npm run dev",
-  "wailsjsdir": "app/frontend/src/wailsjs"
-}
