@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/zichuanxu/godl/internal/download"
@@ -15,14 +16,15 @@ import (
 
 type Client struct {
 	baseURL string
+	token   string
 	http    *http.Client
 }
 
-func New(baseURL string, httpClient *http.Client) *Client {
+func New(baseURL, token string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), token: token, http: httpClient}
 }
 
 func (c *Client) List(ctx context.Context) ([]download.Item, error) {
@@ -46,7 +48,23 @@ func (c *Client) Add(ctx context.Context, rawURL, destination string) (download.
 }
 
 func (c *Client) Pause(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/downloads/"+id+":pause", nil, http.StatusNoContent, nil)
+	return c.do(ctx, http.MethodPost, "/v1/downloads/"+url.PathEscape(id)+":pause", nil, http.StatusNoContent, nil)
+}
+
+func (c *Client) Resume(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, "/v1/downloads/"+url.PathEscape(id)+":resume", nil, http.StatusNoContent, nil)
+}
+
+func (c *Client) Retry(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, "/v1/downloads/"+url.PathEscape(id)+":retry", nil, http.StatusNoContent, nil)
+}
+
+func (c *Client) Delete(ctx context.Context, id string, removeFiles bool) error {
+	path := "/v1/downloads/" + url.PathEscape(id)
+	if removeFiles {
+		path += "?files=true"
+	}
+	return c.do(ctx, http.MethodDelete, path, nil, http.StatusNoContent, nil)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, wantStatus int, output any) error {
@@ -62,7 +80,8 @@ func (c *Client) do(ctx context.Context, method, path string, body any, wantStat
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	if body != nil {
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	if method != http.MethodGet {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)

@@ -250,8 +250,15 @@ queued -> running -> completed
 any non-running state -> deleted (optionally removing the file)
 ```
 
-- Transitions are validated; for example a `completed` item cannot be paused.
-- On service start, items left `running` are reset to `queued` and resume.
+- Transitions are validated; for example a `completed` item cannot be paused. A
+  download that finishes while a pause races it is recorded as `completed`.
+- At most one item may use a destination; a second `add` is rejected.
+- Items left `running` without a runner (after a crash, or a failed store write)
+  are reset to `queued` at start and on every flush tick, and resume.
+- A destination locked by another process requeues the item with a short
+  backoff instead of failing it.
+- Destination confinement (5.1) is re-checked when a download starts and before
+  its files are deleted.
 - Shutdown cancels runners, **waits for them to exit and checkpoint**, then closes the
   store. If the listener fails, the process exits non-zero.
 - Progress lives in memory and is pushed as events. SQLite is written on state

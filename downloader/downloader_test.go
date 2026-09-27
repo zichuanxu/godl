@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zichuanxu/godl/internal/filelock"
 )
 
 type rangeServer struct {
@@ -276,9 +278,11 @@ func TestResumeAfterFailure(t *testing.T) {
 func TestDestinationLock(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "locked.bin")
-	if err := os.WriteFile(dest+".lock", []byte("stale"), 0o600); err != nil {
+	release, err := filelock.Acquire(dest + ".lock")
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
 	dl, err := New(Config{})
 	if err != nil {
 		t.Fatal(err)

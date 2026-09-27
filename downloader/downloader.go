@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/zichuanxu/godl/internal/filelock"
 )
 
 var (
@@ -1243,21 +1245,18 @@ func syncParent(path string) error {
 	return nil
 }
 
+// acquireLock takes an OS advisory lock on path (see internal/filelock). The
+// kernel drops the lock if the process dies, so a lock file left behind by a
+// crash or SIGKILL does not block later runs.
 func acquireLock(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	release, err := filelock.Acquire(path)
+	if errors.Is(err, filelock.ErrLocked) {
+		return nil, fmt.Errorf("%w: %s", ErrLocked, path)
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("%w: %s (remove it only if no downloader is running)", ErrLocked, path)
-		}
-		return nil, fmt.Errorf("create lock file: %w", err)
+		return nil, err
 	}
-	_, _ = fmt.Fprintf(f, "pid=%d\ncreated=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
-	_ = f.Sync()
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("close lock file: %w", err)
-	}
-	return func() { _ = os.Remove(path) }, nil
+	return func() { _ = release() }, nil
 }
 
 func verifySHA256(path, expected string) error {

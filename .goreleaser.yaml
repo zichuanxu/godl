@@ -1,0 +1,42 @@
+version: 2
+
+project_name: godl
+
+builds:
+  - id: godl
+    main: ./cmd/godl
+    binary: godl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - windows
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: godl
+    ids:
+      - godl
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: git
+  sort: asc

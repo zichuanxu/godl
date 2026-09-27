@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/zichuanxu/godl/internal/api"
 	"github.com/zichuanxu/godl/internal/download"
@@ -16,22 +18,34 @@ import (
 )
 
 type Config struct {
-	Address       string
-	DatabasePath  string
+	Address      string
+	DatabasePath string
+	// TokenPath holds the API token; it defaults to DefaultTokenPath.
+	TokenPath string
+	// DownloadRoots confine destinations; they default to DefaultDownloadRoot.
+	DownloadRoots []string
 	Runner        download.Runner
 	MaxConcurrent int
+	Logger        *slog.Logger
 }
 
 type Service struct {
 	cfg Config
+	log *slog.Logger
 
 	store    *store.SQLite
 	manager  *manager.Manager
 	server   *http.Server
 	listener net.Listener
 
+	cancelRun context.CancelFunc
+	runDone   chan struct{}
+	closed    chan struct{}
 	closeOnce sync.Once
 	closeErr  error
+
+	serveMu  sync.Mutex
+	serveErr error
 }
 
 func New(cfg Config) (*Service, error) {
@@ -44,6 +58,27 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Runner == nil {
 		return nil, errors.New("download runner is required")
 	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.DiscardHandler)
+	}
+	if cfg.TokenPath == "" {
+		path, err := DefaultTokenPath()
+		if err != nil {
+			return nil, err
+		}
+		cfg.TokenPath = path
+	}
+	if len(cfg.DownloadRoots) == 0 {
+		root, err := DefaultDownloadRoot()
+		if err != nil {
+			return nil, err
+		}
+		cfg.DownloadRoots = []string{root}
+	}
+	token, err := LoadOrCreateToken(cfg.TokenPath)
+	if err != nil {
+		return nil, err
+	}
 	db, err := store.Open(cfg.DatabasePath)
 	if err != nil {
 		return nil, err
@@ -52,17 +87,25 @@ func New(cfg Config) (*Service, error) {
 	mgr, err := manager.New(db, cfg.Runner, manager.Options{
 		MaxConcurrent: cfg.MaxConcurrent,
 		Publish:       broker.Publish,
+		Logger:        cfg.Logger,
+		DownloadRoots: cfg.DownloadRoots,
 	})
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return &Service{
-		cfg: cfg, store: db, manager: mgr,
-		server: &http.Server{Handler: api.NewHandler(mgr, broker)},
+		cfg: cfg, log: cfg.Logger, store: db, manager: mgr,
+		server: &http.Server{
+			Handler:           api.NewHandler(mgr, broker, api.Config{Token: token, Logger: cfg.Logger}),
+			ReadHeaderTimeout: 10 * time.Second,
+		},
+		closed: make(chan struct{}),
 	}, nil
 }
 
+// Start listens on the loopback address and runs the queue. The service stops
+// when ctx is canceled, Close is called, or the listener fails.
 func (s *Service) Start(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("nil context")
@@ -77,16 +120,33 @@ func (s *Service) Start(ctx context.Context) error {
 		return errors.New("service must listen on a loopback address")
 	}
 	s.listener = listener
-	go s.manager.Run(ctx)
+
+	// The manager gets its own context so Close controls the shutdown order:
+	// stop serving, let runners checkpoint, then close the store.
+	runCtx, cancel := context.WithCancel(context.Background())
+	s.cancelRun = cancel
+	s.runDone = make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		_ = s.Close()
+		defer close(s.runDone)
+		s.manager.Run(runCtx)
 	}()
 	go func() {
 		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.log.Error("serve loopback API", "err", err)
+			s.serveMu.Lock()
+			s.serveErr = err
+			s.serveMu.Unlock()
+		}
+		_ = s.Close()
+	}()
+	go func() {
+		select {
+		case <-ctx.Done():
 			_ = s.Close()
+		case <-s.closed:
 		}
 	}()
+	s.log.Info("service listening", "address", listener.Addr().String())
 	return nil
 }
 
@@ -97,21 +157,29 @@ func (s *Service) Address() string {
 	return s.listener.Addr().String()
 }
 
+// Wait blocks until the service has fully stopped and returns the listener
+// error, if that is what stopped it.
 func (s *Service) Wait() error {
-	if s.listener == nil {
-		return errors.New("service is not started")
-	}
-	return errors.New("service wait is managed by Start context")
+	<-s.closed
+	s.serveMu.Lock()
+	defer s.serveMu.Unlock()
+	return s.serveErr
 }
 
+// Close stops the API, waits for every runner to record its final state, and
+// then closes the store.
 func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
-		if s.server != nil {
-			s.closeErr = s.server.Close()
+		s.closeErr = s.server.Close()
+		if s.cancelRun != nil {
+			s.cancelRun()
+			<-s.runDone
 		}
 		if err := s.store.Close(); s.closeErr == nil {
 			s.closeErr = err
 		}
+		close(s.closed)
+		s.log.Info("service stopped")
 	})
 	return s.closeErr
 }

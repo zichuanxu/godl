@@ -12,14 +12,18 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var ErrNotFound = errors.New("download not found")
+var ErrNotFound = download.ErrNotFound
 
 type SQLite struct {
 	db *sql.DB
 }
 
 func Open(path string) (*SQLite, error) {
-	db, err := sql.Open("sqlite", path)
+	// Pragmas in the DSN apply to every connection the pool opens. WAL with
+	// synchronous=NORMAL stays durable across application crashes; only an OS
+	// crash can lose the last transactions, which a resume re-downloads.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite database: %w", err)
 	}
@@ -33,8 +37,6 @@ func Open(path string) (*SQLite, error) {
 
 func migrate(db *sql.DB) error {
 	const schema = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS downloads (
     id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
@@ -121,6 +123,29 @@ func (s *SQLite) Update(ctx context.Context, item download.Item) error {
 	}
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrNotFound, item.ID)
+	}
+	return nil
+}
+
+func (s *SQLite) UpdateProgress(ctx context.Context, id string, completed, total int64) error {
+	const query = `UPDATE downloads SET completed = ?, total = ? WHERE id = ? AND status = ?`
+	if _, err := s.db.ExecContext(ctx, query, completed, total, id, download.StatusRunning); err != nil {
+		return fmt.Errorf("update download progress %s: %w", id, err)
+	}
+	return nil
+}
+
+func (s *SQLite) Delete(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM downloads WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete download %s: %w", id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count deleted download %s: %w", id, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	return nil
 }

@@ -79,3 +79,47 @@ func TestSQLiteStoreReportsMissingDownload(t *testing.T) {
 		t.Fatalf("Get error = %v; want ErrNotFound", err)
 	}
 }
+
+func TestSQLiteStoreProgressOnlyUpdatesRunningItemsAndDeletes(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "godl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	item := download.Item{ID: "d", URL: "https://example.com/f", Destination: "/tmp/f", Status: download.StatusRunning, CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateProgress(ctx, "d", 10, 100); err != nil {
+		t.Fatal(err)
+	}
+	item.Status = download.StatusCompleted
+	item.Completed, item.Total = 100, 100
+	if err := db.Update(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	// A late flush must not rewind a completed item.
+	if err := db.UpdateProgress(ctx, "d", 50, 100); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.Get(ctx, "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Completed != 100 || got.Status != download.StatusCompleted {
+		t.Fatalf("item after late flush = %+v", got)
+	}
+
+	if err := db.Delete(ctx, "d"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Get(ctx, "d"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Get after delete error = %v; want ErrNotFound", err)
+	}
+	if err := db.Delete(ctx, "d"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second delete error = %v; want ErrNotFound", err)
+	}
+}
