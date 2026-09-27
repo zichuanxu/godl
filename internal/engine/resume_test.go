@@ -65,7 +65,10 @@ func TestResumeAfterCancellationReusesWrittenBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireFile(t, dest, data)
-	if resent := srv.sent.Load() - before; resent > left+1 {
+	// Allow the probe byte plus one throttled piece per connection that the
+	// server wrote into a socket the client closed after a steal.
+	slack := int64(1 + testConfig().Connections*srv.piece)
+	if resent := srv.sent.Load() - before; resent > left+slack {
 		t.Fatalf("resume transferred %d bytes; the checkpoint had only %d left", resent, left)
 	}
 }
@@ -111,8 +114,14 @@ func TestRandomizedCrashResume(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
+		// Trigger on progress, not wall time, so slow CI runners still crash
+		// mid-download: between 10% and 90% of the file, then one checkpoint.
+		target := srv.sent.Load() + int64(float64(len(data))*(0.1+0.8*random.Float64()))
 		go func() { done <- e.Download(ctx, server.URL, dest, nil) }()
-		time.Sleep(time.Duration(random.IntN(70_000)) * time.Microsecond)
+		for srv.sent.Load() < target && len(done) == 0 {
+			time.Sleep(200 * time.Microsecond)
+		}
+		time.Sleep(2 * cfg.CheckpointInterval)
 
 		crash := filepath.Join(dir, "crashed.bin")
 		taken := copyFile(t, dest+".part.meta", crash+".part.meta") && copyFile(t, dest+".part", crash+".part")
@@ -130,7 +139,7 @@ func TestRandomizedCrashResume(t *testing.T) {
 		}
 		requireFile(t, crash, data)
 	}
-	if snapshots < 50 || midway < 25 {
+	if snapshots < 60 || midway < 50 {
 		t.Fatalf("%d snapshots, %d with partial progress; the test is not exercising resume", snapshots, midway)
 	}
 	t.Logf("%d snapshots, %d with partial progress", snapshots, midway)

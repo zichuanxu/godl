@@ -12,8 +12,10 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -51,14 +53,23 @@ func main() {
 	rate := flag.Float64("rate", 4, "per-connection cap in MiB/s")
 	conns := flag.Int("connections", 16, "connections for both tools")
 	gate := flag.Bool("gate", false, "exit non-zero when the gate fails")
+	serveSize := flag.Int("serve", 0, "internal: serve this many MiB and print the URL")
 	flag.Parse()
+	if *serveSize > 0 {
+		src := serve(randomData(*serveSize<<20), *rate*(1<<20))
+		fmt.Printf("%s %x\n", src.url, src.sum)
+		_, _ = io.Copy(io.Discard, os.Stdin) // exit with the parent, however it ends
+		return
+	}
 
 	dir, err := os.MkdirTemp("", "godl-bench-")
 	check(err)
 	defer os.RemoveAll(dir)
 
-	throttled := serve(randomData(*sizeMiB<<20), *rate*(1<<20))
-	unthrottled := serve(randomData(*rawMiB<<20), 0)
+	// Servers run in child processes: on Linux a child's max RSS includes the
+	// memory it shared with its parent before exec, so the parent stays small.
+	throttled := spawnServer(*sizeMiB, *rate)
+	unthrottled := spawnServer(*rawMiB, 0)
 
 	// Each figure is the best of three runs, which keeps scheduler noise on
 	// shared CI runners out of the 95% comparison.
@@ -130,8 +141,30 @@ func best(run func() result) result {
 
 type source struct {
 	url  string
-	data []byte
+	size int64
 	sum  [32]byte
+}
+
+// serverLifelines keeps the servers' stdin open; unreferenced, the pipes would
+// be finalized and the servers would exit early.
+var serverLifelines []io.WriteCloser
+
+func spawnServer(sizeMiB int, rate float64) source {
+	cmd := exec.Command(os.Args[0], "-serve", strconv.Itoa(sizeMiB), "-rate", strconv.FormatFloat(rate, 'f', -1, 64))
+	stdout, err := cmd.StdoutPipe()
+	check(err)
+	stdin, err := cmd.StdinPipe()
+	check(err)
+	serverLifelines = append(serverLifelines, stdin) // closed only when this process exits
+	check(cmd.Start())
+	var url, sum string
+	_, err = fmt.Fscan(stdout, &url, &sum)
+	check(err)
+	digest, err := hex.DecodeString(sum)
+	check(err)
+	src := source{url: url, size: int64(sizeMiB) << 20}
+	copy(src.sum[:], digest)
+	return src
 }
 
 func randomData(size int) []byte {
@@ -188,7 +221,7 @@ func serve(data []byte, rate float64) source {
 		}
 	})
 	go func() { _ = http.Serve(listener, handler) }()
-	return source{url: "http://" + listener.Addr().String() + "/file.bin", data: data, sum: sha256.Sum256(data)}
+	return source{url: "http://" + listener.Addr().String() + "/file.bin", size: int64(len(data)), sum: sha256.Sum256(data)}
 }
 
 func runGodl(bin string, src source, dir, name string, conns int) result {
@@ -212,7 +245,7 @@ func measure(name string, src source, out string, cmd *exec.Cmd) result {
 		fmt.Fprintf(os.Stderr, "%s failed: %v\n%s", name, err, stderr.String())
 		os.Exit(1)
 	}
-	r := result{name: name, wall: time.Since(began), bytes: int64(len(src.data))}
+	r := result{name: name, wall: time.Since(began), bytes: src.size}
 	if usage, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage); ok {
 		r.cpu = time.Duration(usage.Utime.Nano() + usage.Stime.Nano())
 		r.maxRSS = int64(usage.Maxrss)

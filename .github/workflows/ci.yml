@@ -90,5 +90,7 @@ jobs:
 
       - name: performance gate against aria2c
         run: |
+          set -o pipefail
           go build -o godl ./cmd/godl
-          go run ./tools/bench -godl ./godl -gate | tee -a "$GITHUB_STEP_SUMMARY"
+          go build -o bench ./tools/bench
+          ./bench -godl ./godl -gate | tee -a "$GITHUB_STEP_SUMMARY"

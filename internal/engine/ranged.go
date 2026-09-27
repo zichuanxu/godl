@@ -40,6 +40,9 @@ type rangedRun struct {
 	noIfRange atomic.Bool
 	// alive counts workers still running.
 	alive atomic.Int32
+	// began and baseBytes give the run's average per-connection speed.
+	began     time.Time
+	baseBytes int64
 }
 
 func (j *job) ranged(ctx context.Context, info probeInfo) error {
@@ -57,7 +60,11 @@ func (j *job) ranged(ctx context.Context, info probeInfo) error {
 	j.progress.total.Store(info.size)
 	j.progress.completed.Store(info.size - totalSize(remaining))
 
-	r := &rangedRun{job: j, info: info, want: want, file: f, sched: newScheduler(remaining, e.cfg.MinSplitSize, j.connections)}
+	r := &rangedRun{
+		job: j, info: info, want: want, file: f,
+		sched: newScheduler(remaining, e.cfg.MinSplitSize, j.connections),
+		began: time.Now(), baseBytes: j.progress.completed.Load(),
+	}
 	workCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
@@ -194,12 +201,19 @@ func (r *rangedRun) replaceSlow() {
 		samples = append(samples, sample{seg, speed})
 		sum += speed
 	}
-	if len(samples) < 2 {
+	if len(samples) == 0 {
 		return
 	}
-	mean := sum / float64(len(samples))
+	// Compare against the live average and against the run's history, so a
+	// slow tail range is still caught after the fast connections finished.
+	reference := float64(r.job.progress.completed.Load()-r.baseBytes) / now.Sub(r.began).Seconds() / float64(r.job.connections)
+	if len(samples) >= 2 {
+		reference = max(reference, sum/float64(len(samples)))
+	}
 	for _, s := range samples {
-		if s.speed < mean*slowFraction && s.seg.remaining() >= 2*r.sched.minSplit {
+		// Reconnecting costs one request; it pays off when this connection
+		// would need longer than slowMinAge for what it has left.
+		if s.speed < reference*slowFraction && float64(s.seg.remaining()) > s.speed*slowMinAge.Seconds() {
 			if abort := s.seg.abort.Load(); abort != nil {
 				(*abort)()
 			}
@@ -318,32 +332,23 @@ func (r *rangedRun) fetch(ctx context.Context, seg *segment, buf []byte) (progre
 		if n <= 0 {
 			return progressed, nil // done, or the rest was stolen
 		}
-		filled := 0
-		var readErr error
-		for filled < int(n) {
-			m, err := resp.Body.Read(buf[filled:n])
-			if m > 0 {
-				filled += m
-				stall.Reset(e.cfg.StallTimeout)
-			}
-			if err != nil {
-				readErr = err
-				break
-			}
-		}
-		if filled > 0 {
+		// Write whatever each read returns: progress and checkpoints then move
+		// with the data even on a slow connection, and a write never exceeds
+		// the buffer, which keeps steals from cutting through it.
+		m, readErr := resp.Body.Read(buf[:n])
+		if m > 0 {
 			stall.Stop() // a slow disk is not a stalled connection
-			if _, err := r.file.WriteAt(buf[:filled], cursor); err != nil {
+			if _, err := r.file.WriteAt(buf[:m], cursor); err != nil {
 				return progressed, fatal(fmt.Errorf("write partial file: %w", err))
 			}
 			stall.Reset(e.cfg.StallTimeout)
-			seg.advance(int64(filled))
-			seg.bytes.Add(int64(filled))
-			r.job.progress.completed.Add(int64(filled))
+			seg.advance(int64(m))
+			seg.bytes.Add(int64(m))
+			r.job.progress.completed.Add(int64(m))
 			progressed = true
 		}
 		if readErr != nil {
-			if errors.Is(readErr, io.EOF) && filled == int(n) {
+			if errors.Is(readErr, io.EOF) && int64(m) == n {
 				continue // the next window reports completion
 			}
 			if errors.Is(readErr, io.EOF) {
