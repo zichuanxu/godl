@@ -58,8 +58,8 @@ const en = {
   "drop.title": "Drop to download",
   "drop.body": "Links and cURL commands",
 
-  "banner.serviceError": "The download service could not start: {error}. If godl service is running, stop it and reopen godl.",
-  "banner.update": "godl {version} is available.",
+  "banner.serviceError": "The download service could not start: {error}. If godl service is running, stop it and reopen NimGet.",
+  "banner.update": "NimGet {version} is available.",
   "banner.releaseNotes": "View release",
   "banner.dismiss": "Dismiss",
 
@@ -127,7 +127,7 @@ const en = {
   "settings.themeSystem": "System",
   "settings.themeLight": "Light",
   "settings.themeDark": "Dark",
-  "settings.autostart": "Start godl when I log in",
+  "settings.autostart": "Start NimGet when I log in",
   "settings.notifications": "Notify when a download finishes or fails",
   "settings.clipboard": "Offer to download copied links and cURL commands",
   "settings.checkUpdates": "Check GitHub for a new version once a week",
@@ -156,7 +156,7 @@ const en = {
   "settings.ffmpeg": "ffmpeg for “Convert to MP4”",
   "settings.ffmpegHint": "Empty: find ffmpeg on PATH",
   "settings.extraRoots": "Folders you picked",
-  "settings.version": "godl {version}",
+  "settings.version": "NimGet {version}",
 
   "eta.h": "{h}h {m}m",
   "eta.m": "{m}m {s}s",
@@ -224,8 +224,8 @@ const zh: Record<Key, string> = {
   "drop.title": "松开即可下载",
   "drop.body": "支持链接和 cURL 命令",
 
-  "banner.serviceError": "下载服务无法启动：{error}。如果 godl service 正在运行，请先停止它，再重新打开 godl。",
-  "banner.update": "godl {version} 已发布。",
+  "banner.serviceError": "下载服务无法启动：{error}。如果 godl service 正在运行，请先停止它，再重新打开 NimGet。",
+  "banner.update": "NimGet {version} 已发布。",
   "banner.releaseNotes": "查看版本",
   "banner.dismiss": "忽略",
 
@@ -293,7 +293,7 @@ const zh: Record<Key, string> = {
   "settings.themeSystem": "跟随系统",
   "settings.themeLight": "浅色",
   "settings.themeDark": "深色",
-  "settings.autostart": "登录时启动 godl",
+  "settings.autostart": "登录时启动 NimGet",
   "settings.notifications": "下载完成或失败时通知",
   "settings.clipboard": "复制链接或 cURL 命令时提示下载",
   "settings.checkUpdates": "每周在 GitHub 检查一次新版本",
@@ -322,7 +322,7 @@ const zh: Record<Key, string> = {
   "settings.ffmpeg": "用于“转换为 MP4”的 ffmpeg",
   "settings.ffmpegHint": "留空则在 PATH 中查找 ffmpeg",
   "settings.extraRoots": "你选择过的文件夹",
-  "settings.version": "godl {version}",
+  "settings.version": "NimGet {version}",
 
   "eta.h": "{h}小时{m}分",
   "eta.m": "{m}分{s}秒",

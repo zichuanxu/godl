@@ -9,10 +9,10 @@ import (
 // zhCN translates the few strings the Go side shows: the tray menu,
 // notifications, and dialog titles. The frontend has its own catalogue.
 var zhCN = map[string]string{
-	"Show godl":                "显示 godl",
+	"Show NimGet":              "显示 NimGet",
 	"Pause all":                "全部暂停",
 	"Resume all":               "全部继续",
-	"Quit godl":                "退出 godl",
+	"Quit NimGet":              "退出 NimGet",
 	"Download complete":        "下载完成",
 	"Download failed":          "下载失败",
 	"Choose a download folder": "选择下载文件夹",

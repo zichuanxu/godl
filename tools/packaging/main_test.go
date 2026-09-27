@@ -27,8 +27,12 @@ func TestRenderManifests(t *testing.T) {
 		t.Fatal(err)
 	}
 	cask, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Casks/godl-desktop.rb"))
-	if !strings.Contains(string(cask), fmt.Sprintf(`sha256 "%064x"`, 6)) || !strings.Contains(string(cask), `version "1.2.3"`) {
+	if !strings.Contains(string(cask), fmt.Sprintf(`sha256 "%064x"`, 6)) || !strings.Contains(string(cask), `version "1.2.3"`) || !strings.Contains(string(cask), `app "NimGet.app"`) {
 		t.Fatalf("cask:\n%s", cask)
+	}
+	scoop, _ := os.ReadFile(filepath.Join(out, "scoop-bucket/bucket/godl-desktop.json"))
+	if !strings.Contains(string(scoop), `"shortcuts": [["godl.exe", "NimGet"]]`) {
+		t.Fatalf("scoop desktop:\n%s", scoop)
 	}
 	formula, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Formula/godl.rb"))
 	if strings.Count(string(formula), "sha256") != 4 {

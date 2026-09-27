@@ -142,21 +142,21 @@ cask "godl-desktop" do
   sha256 "{{.Dmg.SHA}}"
 
   url "{{.Repo}}/releases/download/v#{version}/godl-desktop_#{version}_macos_universal.dmg"
-  name "godl"
-  desc "Fast download manager with a menu bar app"
+  name "NimGet"
+  desc "Lightweight, open-source download manager built in Go"
   homepage "{{.Repo}}"
 
   depends_on macos: ">= :monterey"
 
-  app "godl.app"
+  app "NimGet.app"
 
   zap trash: "~/Library/Application Support/godl"
 
   caveats <<~EOS
-    godl is free and unsigned: it is not notarized by Apple. On first launch,
+    NimGet is free and unsigned: it is not notarized by Apple. On first launch,
     if macOS says it cannot verify the developer, open System Settings >
     Privacy & Security and choose "Open Anyway", or run:
-      xattr -dr com.apple.quarantine /Applications/godl.app
+      xattr -dr com.apple.quarantine /Applications/NimGet.app
   EOS
 end
 `
@@ -186,17 +186,17 @@ const scoopCLI = `{
 
 const scoopDesktop = `{
     "version": "{{.Version}}",
-    "description": "Fast download manager with a tray app (desktop edition of godl).",
+    "description": "NimGet: a fast desktop download manager built in Go.",
     "homepage": "{{.Repo}}",
     "license": "Apache-2.0",
-    "notes": "godl is unsigned; if SmartScreen warns, choose More info > Run anyway.",
+    "notes": "NimGet is unsigned; if SmartScreen warns, choose More info > Run anyway.",
     "architecture": {
         "64bit": {
             "url": "{{.DesktopZip.URL}}",
             "hash": "{{.DesktopZip.SHA}}"
         }
     },
-    "shortcuts": [["godl.exe", "godl"]],
+    "shortcuts": [["godl.exe", "NimGet"]],
     "checkver": "github",
     "autoupdate": {
         "architecture": {

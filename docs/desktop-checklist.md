@@ -46,7 +46,7 @@ from a clean data directory (`~/Library/Application Support/godl` or
 - [ ] Site settings JSON with a password: the password shows as `********` after reopening Settings and still works.
 - [ ] Notifications arrive for completed and failed downloads (macOS: from the `.app` bundle only), and stop when turned off.
 - [ ] "Always ask where to save" opens the folder picker on Add.
-- [ ] "Start godl when I log in" registers the app (check after logging out and in).
+- [ ] "Start NimGet when I log in" registers the app (check after logging out and in).
 
 ## Extras (M4)
 
@@ -65,7 +65,7 @@ from a clean data directory (`~/Library/Application Support/godl` or
 
 ## Release (M6)
 
-- [ ] The dmg opens with godl.app and an Applications link; after "Open Anyway" the app starts and shows the godl icon in the Dock and the menu bar.
+- [ ] The dmg opens with NimGet.app and an Applications link; after "Open Anyway" the app starts and shows the NimGet icon in the Dock and the menu bar.
 - [ ] The Windows installer installs without administrator rights, adds a Start menu entry and an Apps entry, and uninstalls cleanly (settings in `%AppData%\godl` are kept).
 - [ ] With an older version installed, the update banner appears within a minute of launch (or after the weekly check), links to the release, and Dismiss hides it for that version.
 

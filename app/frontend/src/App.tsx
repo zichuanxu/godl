@@ -358,10 +358,8 @@ function Shell() {
     >
       <aside className={`sidebar ${isMac ? "mac" : ""}`}>
         <div className="brand drag">
-          <span className="logo">
-            <ArrowDownToLine size={15} strokeWidth={2.6} />
-          </span>
-          <span className="brand-name">godl</span>
+          <img className="logo" src="/nimget.png" alt="" />
+          <span className="brand-name">NimGet</span>
         </div>
         <button className="primary block" onClick={() => setAdding({})} title={`${t("app.newDownload")} (${isMac ? "⌘" : "Ctrl+"}N)`}>
           <Plus size={16} strokeWidth={2.4} />

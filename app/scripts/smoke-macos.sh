@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install-to-download check for a release on a clean Mac: installs godl.app
+# Install-to-download check for a release on a clean Mac: installs NimGet.app
 # from the .dmg, launches it, queues a download with the CLI through the
 # app's embedded service, and verifies the file.
 #
@@ -12,7 +12,7 @@ appdir="${3:-/Applications}"
 work="$(mktemp -d)"
 mount="$work/mnt"
 cleanup() {
-  pkill -f "$appdir/godl.app/Contents/MacOS/godl" 2>/dev/null || true
+  pkill -f "$appdir/NimGet.app/Contents/MacOS/godl" 2>/dev/null || true
   if [ -n "${server:-}" ]; then kill "$server" 2>/dev/null || true; wait "$server" 2>/dev/null || true; fi
   hdiutil detach -quiet "$mount" 2>/dev/null || true
   rm -rf "$work"
@@ -27,10 +27,10 @@ trap 'status=$?; [ $status -ne 0 ] && [ -n "${token:-}" ] && diagnose; cleanup' 
 echo "== install"
 mkdir -p "$mount"
 hdiutil attach -quiet -nobrowse -mountpoint "$mount" "$dmg"
-rm -rf "$appdir/godl.app"
-cp -R "$mount/godl.app" "$appdir/"
+rm -rf "$appdir/NimGet.app"
+cp -R "$mount/NimGet.app" "$appdir/"
 hdiutil detach -quiet "$mount"
-codesign --verify --deep "$appdir/godl.app"
+codesign --verify --deep "$appdir/NimGet.app"
 
 echo "== serve a test file"
 mkdir -p "$work/www"
@@ -42,7 +42,7 @@ for _ in $(seq 1 30); do curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 curl -fsI http://127.0.0.1:18790/payload.bin >/dev/null
 
 echo "== launch"
-"$appdir/godl.app/Contents/MacOS/godl" >"$work/app.log" 2>&1 &
+"$appdir/NimGet.app/Contents/MacOS/godl" >"$work/app.log" 2>&1 &
 token="$HOME/Library/Application Support/godl/token"
 for _ in $(seq 1 150); do
   "$cli" --token-file "$token" list >/dev/null 2>&1 && break

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds godl.app as a universal (arm64 + x86_64) binary, signs it ad hoc
-# (godl is unsigned; see DESIGN.md section 10), and packs it as a .dmg and a
+# Builds NimGet.app as a universal (arm64 + x86_64) binary, signs it ad hoc
+# (NimGet is unsigned; see DESIGN.md section 10), and packs it as a .dmg and a
 # .zip. Run from app/ after `npm run build` in app/frontend.
 #
 #   scripts/package-macos.sh 1.0.0 dist
@@ -19,7 +19,7 @@ for arch in arm64 amd64; do
   GOARCH="$arch" go build -tags production -trimpath -ldflags "$ldflags" -o "$work/godl-$arch" .
 done
 
-app="$work/godl.app/Contents"
+app="$work/NimGet.app/Contents"
 mkdir -p "$app/MacOS" "$app/Resources"
 lipo -create -output "$app/MacOS/godl" "$work/godl-arm64" "$work/godl-amd64"
 cp build/darwin/icons.icns "$app/Resources/icons.icns"
@@ -28,15 +28,15 @@ cp build/darwin/icons.icns "$app/Resources/icons.icns"
 plutil -convert xml1 -o "$app/Info.plist" build/darwin/Info.plist
 plutil -replace CFBundleVersion -string "${version%%-*}" "$app/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$version" "$app/Info.plist"
-codesign --force --deep --sign - "$work/godl.app"
-codesign --verify --deep "$work/godl.app"
+codesign --force --deep --sign - "$work/NimGet.app"
+codesign --verify --deep "$work/NimGet.app"
 
 name="godl-desktop_${version}_macos_universal"
-ditto -c -k --sequesterRsrc --keepParent "$work/godl.app" "$out/$name.zip"
+ditto -c -k --sequesterRsrc --keepParent "$work/NimGet.app" "$out/$name.zip"
 
 staging="$work/dmg"
 mkdir -p "$staging"
-cp -R "$work/godl.app" "$staging/"
+cp -R "$work/NimGet.app" "$staging/"
 ln -s /Applications "$staging/Applications"
-hdiutil create -quiet -volname "godl ${version}" -srcfolder "$staging" -fs HFS+ -format UDZO -ov "$out/$name.dmg"
+hdiutil create -quiet -volname "NimGet ${version}" -srcfolder "$staging" -fs HFS+ -format UDZO -ov "$out/$name.dmg"
 ls -l "$out"

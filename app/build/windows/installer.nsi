@@ -1,4 +1,4 @@
-; Per-user installer for the godl desktop app: no administrator rights, an
+; Per-user installer for the NimGet desktop app: no administrator rights, an
 ; entry in Apps & features, and Start menu shortcuts. Built by
 ; scripts/package-windows.sh, which defines VERSION, NUMVERSION (digits
 ; only), BINARY, LICENSE, ICON, and OUTFILE.
@@ -6,7 +6,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-!define PRODUCT "godl"
+!define PRODUCT "NimGet"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\godl"
 
 Name "${PRODUCT} ${VERSION}"
@@ -19,7 +19,7 @@ VIProductVersion "${NUMVERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${NUMVERSION}"
-VIAddVersionKey "FileDescription" "godl installer"
+VIAddVersionKey "FileDescription" "NimGet installer"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 zichuanxu. Apache-2.0."
 
 !define MUI_ICON "${ICON}"
@@ -43,22 +43,23 @@ Function CheckWebView2
   ${If} $0 == ""
   ${OrIf} $0 == "0.0.0.0"
     IfSilent done
-    MessageBox MB_YESNO|MB_ICONEXCLAMATION "godl needs the Microsoft Edge WebView2 Runtime, which is not installed.$\r$\n$\r$\nOpen its download page now?" IDNO done
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "NimGet needs the Microsoft Edge WebView2 Runtime, which is not installed.$\r$\n$\r$\nOpen its download page now?" IDNO done
     ExecShell "open" "https://developer.microsoft.com/microsoft-edge/webview2/#download"
   ${EndIf}
   done:
 FunctionEnd
 
-Section "godl"
+Section "NimGet"
   ; Quit a running copy so its files can be replaced.
   nsExec::Exec 'taskkill /IM godl.exe /F'
   SetOutPath "$INSTDIR"
   File "/oname=godl.exe" "${BINARY}"
   File "/oname=LICENSE.txt" "${LICENSE}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\godl.lnk" "$INSTDIR\godl.exe"
+  Delete "$SMPROGRAMS\godl.lnk"
+  CreateShortcut "$SMPROGRAMS\NimGet.lnk" "$INSTDIR\godl.exe"
   WriteRegStr HKCU "Software\godl" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "godl"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "NimGet"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "zichuanxu"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\godl.exe"
@@ -75,12 +76,14 @@ SectionEnd
 Section "Uninstall"
   nsExec::Exec 'taskkill /IM godl.exe /F'
   Delete "$SMPROGRAMS\godl.lnk"
+  Delete "$SMPROGRAMS\NimGet.lnk"
   Delete "$INSTDIR\godl.exe"
   Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "Software\godl"
-  ; "Start godl when I log in" (Wails autostart) registers this value.
+  ; Wails uses the app name for new autostart entries; remove the old name too.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "godl"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "nimget"
 SectionEnd

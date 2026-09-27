@@ -1,6 +1,8 @@
-# godl
+# NimGet
 
-A fast download manager for macOS, Windows, and Linux, written in Go: a desktop app (macOS, Windows) and a CLI with a background service.
+<img src="app/build/appicon.png" alt="NimGet logo" width="96">
+
+NimGet is a lightweight, open-source download manager built in Go for macOS and Windows. Its `godl` CLI and background service also run on Linux.
 
 - Up to 32 connections per download, rebalanced as they finish; byte-level resume, even after a crash.
 - Queue with priorities, per-host connection caps, speed limits, and a schedule.
@@ -44,7 +46,7 @@ cd app/frontend && npm ci && npm run build && cd ..
 go run .
 ```
 
-For live reload of the UI, keep `npm run dev` running in `app/frontend` and start the app with `FRONTEND_DEVSERVER_URL=http://127.0.0.1:9245 go run .`. Quit any installed godl or `godl service` first: they share port 51000 and a single-instance lock.
+For live reload of the UI, keep `npm run dev` running in `app/frontend` and start the app with `FRONTEND_DEVSERVER_URL=http://127.0.0.1:9245 go run .`. Quit any installed NimGet or `godl service` first: they share port 51000 and a single-instance lock.
 
 After changing a bound Go method or type, regenerate the TypeScript bindings (CI checks them):
 

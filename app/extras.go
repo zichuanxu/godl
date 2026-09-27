@@ -68,7 +68,7 @@ func (d *Desktop) ExportQueue() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path, err := d.app.Dialog.SaveFile().SetFilename("godl-queue.json").CanCreateDirectories(true).PromptForSingleSelection()
+	path, err := d.app.Dialog.SaveFile().SetFilename("nimget-queue.json").CanCreateDirectories(true).PromptForSingleSelection()
 	if err != nil || path == "" {
 		return "", err
 	}

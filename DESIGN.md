@@ -486,7 +486,7 @@ installers. The release workflow also installs the dmg and the installer on clea
 launches the app, and downloads a file through it (the M6 install-to-download check).
 
 docs/install.md documents the Gatekeeper workaround (allow in System Settings, or
-`xattr -dr com.apple.quarantine /Applications/godl.app`) and the SmartScreen
+`xattr -dr com.apple.quarantine /Applications/NimGet.app`) and the SmartScreen
 "More info → Run anyway" path.
 
 **Updates:** weekly poll of the GitHub Releases API, semver compare, dismissible
