@@ -1,7 +1,7 @@
 // Command packaging renders the package-manager manifests for a release from
 // its checksum files: the Homebrew formula (CLI) and cask (desktop app) for
-// zichuanxu/homebrew-tap, Scoop manifests for zichuanxu/scoop-bucket, and a
-// winget manifest set for microsoft/winget-pkgs (DESIGN.md section 10).
+// zichuanxu/homebrew-tap and Scoop manifests for zichuanxu/scoop-bucket
+// (DESIGN.md section 10).
 //
 //	go run ./tools/packaging -version 1.0.0 -checksums dist/checksums.txt,dist/desktop-checksums.txt -out out
 package main
@@ -44,7 +44,7 @@ func run(version string, sumFiles []string, out string) error {
 		"DarwinArm64": "godl_%s_darwin_arm64.tar.gz", "DarwinAmd64": "godl_%s_darwin_amd64.tar.gz",
 		"LinuxArm64": "godl_%s_linux_arm64.tar.gz", "LinuxAmd64": "godl_%s_linux_amd64.tar.gz",
 		"WindowsZip": "godl_%s_windows_amd64.zip", "Dmg": "godl-desktop_%s_macos_universal.dmg",
-		"DesktopZip": "godl-desktop_%s_windows_amd64.zip", "Setup": "godl-desktop_%s_windows_amd64_setup.exe",
+		"DesktopZip": "godl-desktop_%s_windows_amd64.zip",
 	}
 	for key, pattern := range assets {
 		name := fmt.Sprintf(pattern, version)
@@ -54,19 +54,14 @@ func run(version string, sumFiles []string, out string) error {
 		}
 		data[key] = map[string]string{"Name": name, "SHA": sum, "URL": fmt.Sprintf("%s/releases/download/v%s/%s", repo, version, name)}
 	}
-	wingetDir := filepath.Join("winget", "manifests", "z", "zichuanxu", "godl", version)
 	files := map[string]string{
 		filepath.Join("homebrew-tap", "Formula", "godl.rb"):          formula,
 		filepath.Join("homebrew-tap", "Casks", "godl-desktop.rb"):    cask,
 		filepath.Join("scoop-bucket", "bucket", "godl.json"):         scoopCLI,
 		filepath.Join("scoop-bucket", "bucket", "godl-desktop.json"): scoopDesktop,
-		filepath.Join(wingetDir, "zichuanxu.godl.yaml"):              wingetVersion,
-		filepath.Join(wingetDir, "zichuanxu.godl.installer.yaml"):    wingetInstaller,
-		filepath.Join(wingetDir, "zichuanxu.godl.locale.en-US.yaml"): wingetLocale,
 	}
-	funcs := template.FuncMap{"upper": strings.ToUpper}
 	for path, text := range files {
-		tmpl := template.Must(template.New(path).Funcs(funcs).Parse(text))
+		tmpl := template.Must(template.New(path).Parse(text))
 		full := filepath.Join(out, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			return err
@@ -211,50 +206,4 @@ const scoopDesktop = `{
         }
     }
 }
-`
-
-const wingetVersion = `# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
-PackageIdentifier: zichuanxu.godl
-PackageVersion: {{.Version}}
-DefaultLocale: en-US
-ManifestType: version
-ManifestVersion: 1.6.0
-`
-
-const wingetInstaller = `# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-PackageIdentifier: zichuanxu.godl
-PackageVersion: {{.Version}}
-InstallerType: nullsoft
-Scope: user
-InstallModes:
-  - interactive
-  - silent
-UpgradeBehavior: install
-Installers:
-  - Architecture: x64
-    InstallerUrl: {{.Setup.URL}}
-    InstallerSha256: {{upper .Setup.SHA}}
-ManifestType: installer
-ManifestVersion: 1.6.0
-`
-
-const wingetLocale = `# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
-PackageIdentifier: zichuanxu.godl
-PackageVersion: {{.Version}}
-PackageLocale: en-US
-Publisher: zichuanxu
-PublisherUrl: https://github.com/zichuanxu
-PackageName: godl
-PackageUrl: {{.Repo}}
-License: Apache-2.0
-LicenseUrl: {{.Repo}}/blob/main/LICENSE
-ShortDescription: A fast, cross-platform download manager.
-Description: godl downloads over many connections with byte-level resume, schedules and limits downloads, imports browser requests as cURL commands, and saves HLS streams.
-Tags:
-  - download-manager
-  - downloader
-  - hls
-ReleaseNotesUrl: {{.Repo}}/releases/tag/v{{.Version}}
-ManifestType: defaultLocale
-ManifestVersion: 1.6.0
 `

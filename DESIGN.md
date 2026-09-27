@@ -474,15 +474,13 @@ NOTICE          godl attribution
 |---|---|---|
 | GitHub Releases | CLI archives for all tier-1 targets (goreleaser), dmg, zip, Windows installer | from v0.1 for the CLI |
 | `zichuanxu/homebrew-tap` | cask (GUI) and formula (CLI) | Homebrew's official cask repository removes casks that fail Gatekeeper checks from 2026-09-01, so the GUI cannot go there unsigned |
-| winget, scoop | Windows GUI and CLI | |
+| `zichuanxu/scoop-bucket` | Windows GUI and CLI | |
 
 Package names: Homebrew formula `godl` (CLI) and cask `godl-desktop` in
-`zichuanxu/homebrew-tap`; Scoop `godl` and `godl-desktop` in `zichuanxu/scoop-bucket`;
-winget `zichuanxu.godl` (the per-user NSIS installer). `tools/packaging` renders all of
+`zichuanxu/homebrew-tap`; Scoop `godl` and `godl-desktop` in `zichuanxu/scoop-bucket`.
+winget is not offered. `tools/packaging` renders all of
 them from the release checksums; the release workflow pushes the tap and bucket when a
-`TAP_TOKEN` secret exists and attaches the manifests to the release either way; with a
-`WINGET_TOKEN` secret it opens the winget-pkgs pull request for each version after the
-first, which is submitted by hand. Releases start as drafts and are published only after
+`TAP_TOKEN` secret exists and attaches the manifests to the release either way. Releases start as drafts and are published only after
 the install checks pass, so the update banner never points at a release without
 installers. The release workflow also installs the dmg and the installer on clean GitHub runners,
 launches the app, and downloads a file through it (the M6 install-to-download check).
@@ -511,7 +509,7 @@ desktop bug.
 | **M3** | v0.6 ✅¹ | GUI: Wails v3, in-process service, bindings and event bus, tray/menubar, notifications, sparkline, settings, drag-drop, open/reveal folder, cURL import, clipboard monitor, keyring-encrypted secrets. | Manual checklist passes on macOS and Windows. |
 | **M4** | v0.6 ✅¹ | Extras: batch URL patterns, queue import/export, completion actions (open, sleep, shut down). | Unit tests plus manual checklist. |
 | **M5** | v0.6 ✅ | HLS: playlist parsing, AES-128, TS/fMP4 concatenation, optional system-ffmpeg remux. | Hostile-HLS fault tests green for clear and encrypted streams. |
-| **M6** | v1.0 ✅ | Release: dmg, zip, Windows installer, Homebrew tap, winget, scoop, version-check banner, install docs. | Install-to-download flow verified on clean macOS and Windows VMs. |
+| **M6** | v1.0 ✅ | Release: dmg, zip, Windows installer, Homebrew tap, scoop, version-check banner, install docs. | Install-to-download flow verified on clean macOS and Windows VMs. |
 
 M6's install-to-download check runs in the release workflow on fresh GitHub macOS and
 Windows runners: it installs the dmg and the NSIS installer, launches the app, downloads
@@ -581,5 +579,5 @@ Decisions taken in the review:
 | Local API | Token, Host allowlist, JSON-only, Origin rejection, destination confinement |
 | Engine | Finish the interval engine; stall timeout; RFC 9110 validator table |
 | Connections | 8 per download (max 32), 16 per host, 1 MiB minimum split |
-| Distribution | Unsigned; own Homebrew tap; winget and scoop |
+| Distribution | Unsigned; own Homebrew tap and Scoop bucket |
 | Order | Hardening (M0.5) before the engine rewrite; proxy in M2; extras before HLS |

@@ -30,10 +30,6 @@ func TestRenderManifests(t *testing.T) {
 	if !strings.Contains(string(cask), fmt.Sprintf(`sha256 "%064x"`, 6)) || !strings.Contains(string(cask), `version "1.2.3"`) {
 		t.Fatalf("cask:\n%s", cask)
 	}
-	installer, _ := os.ReadFile(filepath.Join(out, "winget/manifests/z/zichuanxu/godl/1.2.3/zichuanxu.godl.installer.yaml"))
-	if !strings.Contains(string(installer), strings.ToUpper(fmt.Sprintf("%064x", 8))) || !strings.Contains(string(installer), "_setup.exe") {
-		t.Fatalf("installer:\n%s", installer)
-	}
 	formula, _ := os.ReadFile(filepath.Join(out, "homebrew-tap/Formula/godl.rb"))
 	if strings.Count(string(formula), "sha256") != 4 {
 		t.Fatalf("formula:\n%s", formula)

@@ -166,7 +166,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false
 
-  # Homebrew tap, Scoop bucket, and winget manifests. Stable releases only.
+  # Homebrew tap and Scoop bucket manifests. Stable releases only.
   manifests:
     needs: publish
     if: ${{ !contains(github.ref_name, '-') }}
@@ -214,22 +214,3 @@ jobs:
             git -C "/tmp/${repo}" push -q
           done
 
-      # WINGET_TOKEN: a classic token with public_repo, for a fork of
-      # microsoft/winget-pkgs. komac opens the pull request; winget serves
-      # the version once Microsoft's review merges it. The first version is
-      # submitted by hand ("komac new"), as winget-pkgs requires.
-      - name: submit to winget
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$WINGET_TOKEN" ]; then
-            echo "::notice::WINGET_TOKEN is not set; submit manifests/winget by hand"
-            exit 0
-          fi
-          v="${GITHUB_REF_NAME#v}"
-          curl -fsSL -o komac.deb "https://github.com/russellbanks/Komac/releases/latest/download/komac_$(curl -fsSL https://api.github.com/repos/russellbanks/Komac/releases/latest | jq -r .tag_name | sed 's/^v//')-1_amd64.deb"
-          sudo dpkg -i komac.deb
-          komac update zichuanxu.godl --version "$v" \
-            --urls "https://github.com/zichuanxu/godl/releases/download/v${v}/godl-desktop_${v}_windows_amd64_setup.exe" \
-            --submit --token "$WINGET_TOKEN"

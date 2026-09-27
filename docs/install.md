@@ -38,20 +38,14 @@ Or unpack `godl_<version>_darwin_arm64.tar.gz` (Apple silicon) or `..._darwin_am
 
 ### Desktop app
 
-Any of:
-
-```powershell
-winget install zichuanxu.godl
-```
+With Scoop:
 
 ```powershell
 scoop bucket add zichuanxu https://github.com/zichuanxu/scoop-bucket
 scoop install zichuanxu/godl-desktop
 ```
 
-winget lists a version only after Microsoft's review of its manifest merges, which can take a few days after the release; the installer on the release page is available at once.
-
-or download `godl-desktop_<version>_windows_amd64_setup.exe` (installer, no administrator rights needed) or `..._windows_amd64.zip` (portable).
+Or download `godl-desktop_<version>_windows_amd64_setup.exe` (installer, no administrator rights needed) or `..._windows_amd64.zip` (portable).
 
 SmartScreen may show "Windows protected your PC". Choose **More info → Run anyway**. The app needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes and Windows 10 receives through Windows Update; the installer offers the download page if it is missing.
 
@@ -88,9 +82,9 @@ shasum -a 256 -c checksums.txt --ignore-missing
 
 ## Updates
 
-The desktop app checks GitHub once a week and shows a banner when a newer version exists (turn this off in **Settings → Desktop**). The check goes through the proxy configured in godl. It never downloads or installs anything by itself: update with the same method you installed with (`brew upgrade`, `winget upgrade`, `scoop update`, or a new download).
+The desktop app checks GitHub once a week and shows a banner when a newer version exists (turn this off in **Settings → Desktop**). The check goes through the proxy configured in godl. It never downloads or installs anything by itself: update with the same method you installed with (`brew upgrade`, `scoop update`, or a new download).
 
 ## Uninstalling
 
 - macOS: `brew uninstall --cask godl-desktop`, or drag godl from Applications to the Trash. Remove `~/Library/Application Support/godl` to delete settings and the queue.
-- Windows: **Settings → Apps → godl → Uninstall**, `winget uninstall zichuanxu.godl`, or `scoop uninstall godl-desktop`. Remove `%AppData%\godl` to delete settings and the queue.
+- Windows: **Settings → Apps → godl → Uninstall** or `scoop uninstall godl-desktop`. Remove `%AppData%\godl` to delete settings and the queue.
