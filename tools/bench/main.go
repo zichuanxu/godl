@@ -253,10 +253,24 @@ func measure(name string, src source, out string, cmd *exec.Cmd) result {
 			r.maxRSS *= 1024 // kilobytes on Linux, bytes on macOS
 		}
 	}
-	got, err := os.ReadFile(out)
-	r.correct = err == nil && sha256.Sum256(got) == src.sum
+	r.correct = fileSum(out) == src.sum
 	_ = os.Remove(out)
 	return r
+}
+
+// fileSum streams the file: reading it whole would grow this process, and on
+// Linux later children would inherit that RSS in their own figures.
+func fileSum(path string) (sum [32]byte) {
+	f, err := os.Open(path)
+	if err != nil {
+		return sum
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err == nil {
+		copy(sum[:], h.Sum(nil))
+	}
+	return sum
 }
 
 func check(err error) {
