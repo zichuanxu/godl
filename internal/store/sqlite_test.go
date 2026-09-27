@@ -241,7 +241,8 @@ func TestSQLiteStoreSealsSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	// The handle is reopened below; close whichever is current at the end.
+	t.Cleanup(func() { _ = db.Close() })
 	if got, err := db.Get(ctx, "x"); err != nil || got.Headers != nil {
 		t.Fatalf("foreign key: headers = %v, err = %v", got.Headers, err)
 	}
