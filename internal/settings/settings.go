@@ -49,6 +49,8 @@ type Desktop struct {
 	// FFmpeg is the ffmpeg executable for converting streams to MP4; empty
 	// means ffmpeg on PATH.
 	FFmpeg string `json:"ffmpeg,omitempty"`
+	// CheckUpdates polls GitHub Releases once a week for a newer version.
+	CheckUpdates bool `json:"checkUpdates"`
 }
 
 // Schedule runs the queue only between Start and Stop ("HH:MM" local time,
@@ -138,7 +140,7 @@ func Default() Settings {
 	return Settings{
 		MaxConcurrent: 3, Connections: 8, HostConnections: 16,
 		Proxy:   netproxy.Config{Mode: netproxy.ModeSystem},
-		Desktop: Desktop{ClipboardMonitor: true, Notifications: true},
+		Desktop: Desktop{ClipboardMonitor: true, Notifications: true, CheckUpdates: true},
 	}
 }
 

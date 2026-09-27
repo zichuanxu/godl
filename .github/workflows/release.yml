@@ -9,6 +9,7 @@ permissions:
   contents: write
 
 jobs:
+  # CLI archives for every tier-1 target, checksums.txt, and the release.
   goreleaser:
     runs-on: ubuntu-latest
     steps:
@@ -28,3 +29,174 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  desktop-macos:
+    needs: goreleaser
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - run: cd frontend && npm ci && npm run build
+
+      - name: package dmg and zip
+        run: scripts/package-macos.sh "${GITHUB_REF_NAME#v}" dist
+
+      - name: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  desktop-windows:
+    needs: goreleaser
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - run: cd frontend && npm ci && npm run build
+
+      - name: tools
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.26
+          if ! command -v makensis >/dev/null; then
+            if [ -x "/c/Program Files (x86)/NSIS/makensis.exe" ]; then
+              echo "/c/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+            else
+              choco install nsis -y --no-progress
+              echo "/c/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+            fi
+          fi
+
+      - name: package installer and zip
+        run: scripts/package-windows.sh "${GITHUB_REF_NAME#v}" dist
+
+      - name: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  desktop-checksums:
+    needs: [desktop-macos, desktop-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: checksum the desktop assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p 'godl-desktop_*' -D assets
+          (cd assets && sha256sum godl-desktop_* > ../desktop-checksums.txt)
+          cat desktop-checksums.txt
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" desktop-checksums.txt --clobber
+
+  # Install-to-download on clean runners (DESIGN.md milestone M6).
+  smoke-macos:
+    needs: desktop-checksums
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" -p "godl-desktop_${v}_macos_universal.dmg" -p "godl_${v}_darwin_arm64.tar.gz" -D assets
+          tar -xzf "assets/godl_${v}_darwin_arm64.tar.gz" -C assets godl
+
+      - name: install, launch, and download
+        run: app/scripts/smoke-macos.sh assets/godl-desktop_*_macos_universal.dmg assets/godl
+
+  smoke-windows:
+    needs: desktop-checksums
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" -p "godl-desktop_${v}_windows_amd64_setup.exe" -p "godl_${v}_windows_amd64.zip" -D assets
+          unzip -o "assets/godl_${v}_windows_amd64.zip" godl.exe -d assets
+
+      - name: install, launch, download, and uninstall
+        run: app/scripts/smoke-windows.sh assets/godl-desktop_*_setup.exe assets/godl.exe
+
+  # Homebrew tap, Scoop bucket, and winget manifests. Stable releases only.
+  manifests:
+    needs: [smoke-macos, smoke-windows]
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: render manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$GITHUB_REF_NAME" -p checksums.txt -p desktop-checksums.txt -D sums
+          go run ./tools/packaging -version "${GITHUB_REF_NAME#v}" -checksums sums/checksums.txt,sums/desktop-checksums.txt -out manifests
+          (cd manifests && zip -qr ../package-manifests.zip .)
+          gh release upload "$GITHUB_REF_NAME" package-manifests.zip --clobber
+
+      # TAP_TOKEN: a fine-grained token with contents:write on
+      # zichuanxu/homebrew-tap and zichuanxu/scoop-bucket. Without it the
+      # manifests stay attached to the release for a manual push.
+      - name: publish to the tap and the bucket
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::TAP_TOKEN is not set; push package-manifests.zip by hand"
+            exit 0
+          fi
+          git config --global user.name "godl release"
+          git config --global user.email "zichuanxu28@gmail.com"
+          for repo in homebrew-tap scoop-bucket; do
+            git clone -q "https://x-access-token:${TAP_TOKEN}@github.com/zichuanxu/${repo}.git" "/tmp/${repo}"
+            cp -R "manifests/${repo}/." "/tmp/${repo}/"
+            git -C "/tmp/${repo}" add -A
+            git -C "/tmp/${repo}" commit -qm "godl ${GITHUB_REF_NAME}" || continue
+            git -C "/tmp/${repo}" push -q
+          done

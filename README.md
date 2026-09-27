@@ -13,7 +13,17 @@ HLS streams (`.m3u8`, including AES-128 encryption) download as one playable `.t
 
 The desktop app (macOS and Windows) runs the same service in-process, with a tray icon, notifications, drag and drop, cURL import, a clipboard monitor, batch URL patterns, queue import and export, and sleep or shut down when the queue is done.
 
-The roadmap and design contract live in [DESIGN.md](DESIGN.md). This is milestone **M5 (HLS)**; installers arrive with v1.0 (M6).
+The roadmap and design contract live in [DESIGN.md](DESIGN.md).
+
+## Install
+
+| | |
+| --- | --- |
+| macOS app | `brew install --cask zichuanxu/tap/godl-desktop`, or the `.dmg` from [Releases](https://github.com/zichuanxu/godl/releases/latest) |
+| Windows app | `winget install zichuanxu.godl`, `scoop install godl-desktop` (bucket `zichuanxu/scoop-bucket`), or the installer from Releases |
+| CLI (macOS, Linux, Windows) | `brew install zichuanxu/tap/godl`, `scoop install godl`, or an archive from Releases |
+
+The builds are unsigned, so the first launch needs one confirmation: [docs/install.md](docs/install.md) has the steps for Gatekeeper and SmartScreen.
 
 ## Requirements
 
@@ -47,6 +57,8 @@ cd app/frontend && npm ci && npm run build && cd ..
 go build -tags production -o bin/godl .                                     # macOS (cgo)
 GOOS=windows CGO_ENABLED=0 go build -tags production -ldflags "-H windowsgui" -o bin/godl.exe .
 ```
+
+Release packages come from `app/scripts/package-macos.sh` (universal `.app`, `.dmg`, `.zip`) and `app/scripts/package-windows.sh` (`.exe` with icon and manifest, portable `.zip`, NSIS installer); the release workflow runs them, then installs each package on a clean runner and downloads a file through it (`app/scripts/smoke-*.sh`).
 
 After changing a bound Go type or method, regenerate the TypeScript bindings (CI checks they are current):
 
@@ -240,12 +252,16 @@ internal/remux/       Optional ffmpeg remux of .ts to .mp4
 internal/batch/       Batch URL patterns
 internal/queuefile/   Queue import and export
 internal/power/       Sleep and shut down
+internal/update/      Weekly release check for the desktop banner
+internal/quarantine/  Marks completed files as downloaded from the internet
 internal/secrets/     AES-GCM sealing with a key in the OS keyring
 internal/curlimport/  "Copy as cURL" parser
 internal/api/         Authenticated loopback JSON and SSE API
 internal/client/      Service client
 internal/service/     Service composition, lifecycle, paths, and token
 tools/bench/          Performance gate against aria2c
+tools/packaging/      Homebrew, Scoop, and winget manifests for a release
+docs/                 Install guide and desktop checklist
 app/                  Desktop app (Wails v3 module): bindings, tray, React frontend
 DESIGN.md             Design contract and M0–M6 roadmap
 ```

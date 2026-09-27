@@ -114,3 +114,5 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 label.inline { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 label.inline select { width: auto; padding: 3px 6px; }
 .toast { white-space: pre-wrap; }
+.banner.update { background: var(--accent); display: flex; align-items: center; gap: 8px; }
+.banner.update button.link { color: #fff; text-decoration: underline; }

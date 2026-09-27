@@ -5,6 +5,10 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as update$0 from "../internal/update/models.js";
+
 /**
  * ImportResult reports an import.
  */
@@ -51,6 +55,11 @@ export class State {
     "defaultDirectory": string;
     "autostart": boolean;
 
+    /**
+     * Update is set when a newer release is available.
+     */
+    "update"?: update$0.Release | null;
+
     /** Creates a new State instance. */
     constructor($$source: Partial<State> = {}) {
         if (!("version" in $$source)) {
@@ -70,10 +79,16 @@ export class State {
      * Creates a new State instance from a string or object.
      */
     static createFrom($$source: any = {}): State {
+        const $$createField4_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("update" in $$parsedSource) {
+            $$parsedSource["update"] = $$createField4_0($$parsedSource["update"]);
+        }
         return new State($$parsedSource as Partial<State>);
     }
 }
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = update$0.Release.createFrom;
+const $$createType2 = $Create.Nullable($$createType1);

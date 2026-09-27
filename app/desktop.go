@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/zichuanxu/godl/internal/manager"
 	"github.com/zichuanxu/godl/internal/service"
 	"github.com/zichuanxu/godl/internal/settings"
+	"github.com/zichuanxu/godl/internal/update"
 )
 
 // Event names emitted to the frontend.
@@ -29,11 +31,13 @@ const (
 	eventResync    = "resync"    // events were dropped; reload the list
 	eventClipboard = "clipboard" // a copied URL or curl command
 	eventStopped   = "stopped"   // the service stopped; re-read State
+	eventUpdate    = "update"    // update.Release: a newer version exists
 )
 
 func init() {
 	application.RegisterEvent[download.Event](eventDownload)
 	application.RegisterEvent[string](eventClipboard)
+	application.RegisterEvent[update.Release](eventUpdate)
 }
 
 var errNotRunning = errors.New("the download service is not running")
@@ -60,6 +64,8 @@ type Desktop struct {
 	notifications chan download.Item
 	// whenDone is the pending completion action (a string).
 	whenDone atomic.Value
+	// newer is the newest release, when it is newer than this build.
+	newer atomic.Pointer[update.Release]
 }
 
 // State describes the backend to the frontend.
@@ -70,6 +76,8 @@ type State struct {
 	Error            string `json:"error,omitempty"`
 	DefaultDirectory string `json:"defaultDirectory"`
 	Autostart        bool   `json:"autostart"`
+	// Update is set when a newer release is available.
+	Update *update.Release `json:"update,omitempty"`
 }
 
 // ServiceStartup starts the embedded download service before the window
@@ -96,6 +104,7 @@ func (d *Desktop) ServiceStartup(ctx context.Context, _ application.ServiceOptio
 	go d.forward()
 	go d.notifyLoop()
 	go d.watchClipboard(ctx)
+	go d.watchReleases(ctx)
 	go func() {
 		err := svc.Wait()
 		if ctx.Err() != nil {
@@ -134,6 +143,7 @@ func (d *Desktop) State() State {
 	if d.app != nil {
 		s.Autostart, _ = d.app.Autostart.IsEnabled()
 	}
+	s.Update = d.newer.Load()
 	return s
 }
 
@@ -446,6 +456,38 @@ func host(rawURL string) string {
 		return ""
 	}
 	return strings.ToLower(u.Hostname())
+}
+
+// watchReleases checks for a newer version shortly after startup and then
+// every few hours; update.Check itself polls GitHub at most once a week.
+func (d *Desktop) watchReleases(ctx context.Context) {
+	dir, err := service.DataDir()
+	if err != nil {
+		return
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		timer.Reset(6 * time.Hour)
+		if !d.mgr.Settings().Desktop.CheckUpdates {
+			continue
+		}
+		rel, ok, err := update.Check(ctx, client, update.LatestURL, update.StatePath(dir), version, time.Now())
+		if err != nil {
+			d.log.Info("update check", "err", err)
+			continue
+		}
+		if ok {
+			d.newer.Store(&rel)
+			d.app.Event.Emit(eventUpdate, rel)
+		}
+	}
 }
 
 // offerable reports a single http(s) URL or a curl command.

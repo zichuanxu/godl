@@ -146,6 +146,10 @@ export default function SettingsDialog({ state, onClose, onSaved }: Props) {
               Open files when they finish
             </label>
             <label className="check">
+              <input type="checkbox" checked={s.desktop.checkUpdates} onChange={(e) => set({ desktop: { ...s.desktop, checkUpdates: e.target.checked } })} />
+              Check GitHub for a new version once a week
+            </label>
+            <label className="check">
               <input type="checkbox" checked={autostart} onChange={(e) => setAutostart(e.target.checked)} />
               Start godl when I log in
             </label>

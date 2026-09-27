@@ -9,14 +9,19 @@ import { Create as $Create } from "@wailsio/runtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as download$0 from "../../../../zichuanxu/godl/internal/download/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as update$0 from "../../../../zichuanxu/godl/internal/update/models.js";
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
         "download": $$createType0,
+        "update": $$createType1,
     }));
 }
 
 // Private type creation functions
 const $$createType0 = download$0.Event.createFrom;
+const $$createType1 = update$0.Release.createFrom;
 
 configure();

@@ -57,6 +57,12 @@ from a clean data directory (`~/Library/Application Support/godl` or
 - [ ] Pause and resume an HLS download: it continues from the finished segments.
 - [ ] With ffmpeg installed, "Convert to MP4" creates a playable `.mp4` next to the `.ts`; without ffmpeg the button is hidden.
 
+## Release (M6)
+
+- [ ] The dmg opens with godl.app and an Applications link; after "Open Anyway" the app starts and shows the godl icon in the Dock and the menu bar.
+- [ ] The Windows installer installs without administrator rights, adds a Start menu entry and an Apps entry, and uninstalls cleanly (settings in `%AppData%\godl` are kept).
+- [ ] With an older version installed, the update banner appears within a minute of launch (or after the weekly check), links to the release, and Dismiss hides it for that version.
+
 ## Secrets
 
 - [ ] After adding a download with a cookie, the cookie value does not appear in `godl.db` (for example `strings godl.db | grep <value>` finds nothing).

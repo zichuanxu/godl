@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Builds godl.exe with its icon and manifest, a portable .zip, and a
+# per-user NSIS installer. Run from app/ in Git Bash after `npm run build` in
+# app/frontend; needs wails3 (for the resource file) and makensis.
+#
+#   scripts/package-windows.sh 1.0.0 dist
+set -euo pipefail
+
+version="${1:?version, for example 1.0.0}"
+out="${2:?output directory}"
+mkdir -p "$out"
+work="$(mktemp -d)"
+trap 'rm -rf "$work" wails_windows_amd64.syso' EXIT
+
+# Version resource, icon, and manifest (DPI awareness, common controls v6).
+sed -e "s/0\.0\.0/${version}/g" build/windows/info.json > "$work/info.json"
+wails3 generate syso -arch amd64 -icon build/windows/icon.ico \
+  -manifest build/windows/wails.exe.manifest -info "$work/info.json" -out wails_windows_amd64.syso
+
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags production -trimpath \
+  -ldflags "-s -w -H windowsgui -X main.version=v${version}" -o "$work/godl.exe" .
+
+name="godl-desktop_${version}_windows_amd64"
+mkdir -p "$work/portable"
+cp "$work/godl.exe" ../LICENSE ../NOTICE "$work/portable/"
+(cd "$work/portable" && 7z a -tzip -bso0 "$work/$name.zip" .)
+cp "$work/$name.zip" "$out/"
+
+makensis -V2 -DVERSION="${version}" -DBINARY="$(cygpath -w "$work/godl.exe")" \
+  -DLICENSE="$(cygpath -w ../LICENSE)" -DICON="$(cygpath -w build/windows/icon.ico)" \
+  -DOUTFILE="$(cygpath -w "$out/godl-desktop_${version}_windows_amd64_setup.exe")" \
+  build/windows/installer.nsi
+ls -l "$out"

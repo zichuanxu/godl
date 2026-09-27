@@ -33,6 +33,11 @@ export class Desktop {
      */
     "ffmpeg"?: string;
 
+    /**
+     * CheckUpdates polls GitHub Releases once a week for a newer version.
+     */
+    "checkUpdates": boolean;
+
     /** Creates a new Desktop instance. */
     constructor($$source: Partial<Desktop> = {}) {
         if (!("clipboardMonitor" in $$source)) {
@@ -46,6 +51,9 @@ export class Desktop {
         }
         if (!("openWhenDone" in $$source)) {
             this["openWhenDone"] = false;
+        }
+        if (!("checkUpdates" in $$source)) {
+            this["checkUpdates"] = false;
         }
 
         Object.assign(this, $$source);

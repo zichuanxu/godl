@@ -10,11 +10,17 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"github.com/wailsapp/wails/v3/pkg/icons"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+var (
+	//go:embed icons/tray-template.png
+	trayTemplate []byte // macOS menu bar glyph, tinted by the system
+	//go:embed icons/tray-windows.png
+	trayIcon []byte
+)
 
 // Set at link time: -X main.version=...
 var version = "dev"
@@ -53,9 +59,9 @@ func main() {
 
 	tray := app.SystemTray.New()
 	if runtime.GOOS == "darwin" {
-		tray.SetTemplateIcon(icons.SystrayMacTemplate)
+		tray.SetTemplateIcon(trayTemplate)
 	} else {
-		tray.SetIcon(icons.DefaultWindowsIcon)
+		tray.SetIcon(trayIcon)
 	}
 	tray.SetTooltip("godl")
 	menu := app.NewMenu()

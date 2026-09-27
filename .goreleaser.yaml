@@ -40,3 +40,16 @@ checksum:
 changelog:
   use: git
   sort: asc
+
+release:
+  prerelease: auto
+  footer: |
+    ## Install
+
+    | | |
+    | --- | --- |
+    | macOS app | `godl-desktop_{{ .Version }}_macos_universal.dmg`, or `brew install --cask zichuanxu/tap/godl-desktop` |
+    | Windows app | `godl-desktop_{{ .Version }}_windows_amd64_setup.exe`, `winget install zichuanxu.godl`, or `scoop install godl-desktop` from `zichuanxu/scoop-bucket` |
+    | CLI and service | the `godl_{{ .Version }}_*` archives, `brew install zichuanxu/tap/godl`, or `scoop install godl` |
+
+    The builds are not signed. See [docs/install.md](https://github.com/zichuanxu/godl/blob/main/docs/install.md) for the one-time Gatekeeper and SmartScreen steps. Desktop checksums are in `desktop-checksums.txt`.

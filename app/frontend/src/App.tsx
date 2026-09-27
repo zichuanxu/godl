@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Events } from "@wailsio/runtime";
+import { Browser, Events } from "@wailsio/runtime";
 import { Desktop, EventType, Item, State, Status, message } from "./api";
 import AddDialog, { type AddPrefill } from "./AddDialog";
 import SettingsDialog from "./SettingsDialog";
@@ -33,6 +33,13 @@ export default function App() {
   const [canConvert, setCanConvert] = useState(false);
   const [converting, setConverting] = useState(false);
   const [countdown, setCountdown] = useState<{ action: string; left: number } | null>(null);
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem("dismissedUpdate") ?? "";
+    } catch {
+      return "";
+    }
+  });
   const samples = useRef(new Map<string, Sample>());
   const [, setTick] = useState(0);
 
@@ -82,6 +89,7 @@ export default function App() {
     const offStopped = Events.On("stopped", () => Desktop.State().then(setState).catch(fail));
     const offClip = Events.On("clipboard", (ev) => setClip(ev.data));
     const offDone = Events.On("queue-done", (ev) => setCountdown({ action: ev.data, left: 30 }));
+    const offUpdate = Events.On("update", () => Desktop.State().then(setState).catch(() => {}));
     const timer = window.setInterval(() => {
       const now = performance.now();
       let total = 0;
@@ -98,6 +106,7 @@ export default function App() {
       offStopped();
       offClip();
       offDone();
+      offUpdate();
       window.clearInterval(timer);
     };
   }, [reload, fail]);
@@ -164,6 +173,27 @@ export default function App() {
       {state?.error && (
         <div className="banner">
           The download service could not start: {state.error}. If <code>godl service</code> is running, stop it and reopen godl.
+        </div>
+      )}
+      {state?.update && state.update.version !== dismissed && (
+        <div className="banner update">
+          godl {state.update.version} is available.{" "}
+          <button className="link" onClick={() => Browser.OpenURL(state.update!.url)}>Release notes and downloads</button>
+          <span className="grow" />
+          <button
+            className="link"
+            onClick={() => {
+              const v = state.update!.version;
+              setDismissed(v);
+              try {
+                localStorage.setItem("dismissedUpdate", v);
+              } catch {
+                // per-viewer convenience only
+              }
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       )}
       <header className="toolbar">
