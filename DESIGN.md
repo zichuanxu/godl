@@ -511,7 +511,11 @@ desktop bug.
 | **M3** | v0.6 ✅¹ | GUI: Wails v3, in-process service, bindings and event bus, tray/menubar, notifications, sparkline, settings, drag-drop, open/reveal folder, cURL import, clipboard monitor, keyring-encrypted secrets. | Manual checklist passes on macOS and Windows. |
 | **M4** | v0.6 ✅¹ | Extras: batch URL patterns, queue import/export, completion actions (open, sleep, shut down). | Unit tests plus manual checklist. |
 | **M5** | v0.6 ✅ | HLS: playlist parsing, AES-128, TS/fMP4 concatenation, optional system-ffmpeg remux. | Hostile-HLS fault tests green for clear and encrypted streams. |
-| **M6** | v1.0 | Release: dmg, zip, Windows installer, Homebrew tap, winget, scoop, version-check banner, install docs. | Install-to-download flow verified on clean macOS and Windows VMs. |
+| **M6** | v1.0 ✅ | Release: dmg, zip, Windows installer, Homebrew tap, winget, scoop, version-check banner, install docs. | Install-to-download flow verified on clean macOS and Windows VMs. |
+
+M6's install-to-download check runs in the release workflow on fresh GitHub macOS and
+Windows runners: it installs the dmg and the NSIS installer, launches the app, downloads
+a file through it, verifies it, and (on Windows) uninstalls.
 
 ¹ M3, M4, and M5 shipped together in v0.6. Their automated checks pass in CI (unit tests,
 the desktop build on macOS and Windows, current bindings); the manual checklist
